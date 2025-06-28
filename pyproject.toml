@@ -1,0 +1,24 @@
+[project]
+name = "octorun"
+version = "0.1.0"
+description = "A command-line tool for running tasks and scripts"
+readme = "README.md"
+authors = [
+    { name = "Haobo Yuan", email = "haoboyuan@ucmerced.edu" }
+]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+octorun = "octorun.cli:cli_main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=22.0",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

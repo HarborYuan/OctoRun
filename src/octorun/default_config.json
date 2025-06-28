@@ -1,0 +1,11 @@
+{
+    "script_path": "sleeper",
+    "gpus": "auto",
+    "max_concurrent": 4,
+    "log_dir": "logs",
+    "chunk_lock_dir": "locks",
+    "monitor_interval": 60,
+    "restart_failed": false,
+    "max_retries": 3,
+    "memory_threshold": 90
+}
