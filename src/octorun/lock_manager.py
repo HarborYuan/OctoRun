@@ -118,7 +118,7 @@ class ChunkLockManager:
             except OSError:
                 pass  # File might have been removed already
 
-    
+
     def release_all_locks(self):
         """Release all acquired locks"""
         for chunk_id in list(self.acquired_locks):
@@ -128,5 +128,3 @@ class ChunkLockManager:
         """Check if a chunk is currently locked"""
         lock_file = os.path.join(self.lock_dir, f"chunk_{chunk_id}.lock")
         return os.path.exists(lock_file)
-
-
