@@ -1,4 +1,5 @@
 import datetime
+import time
 import os
 import tempfile
 import shutil
@@ -362,8 +363,8 @@ class TestProcessManager:
             
             # Verify initial process starts
             assert mock_start_process.call_count == 2
-            mock_start_process.assert_any_call(0, 0, 2)
-            mock_start_process.assert_any_call(1, 1, 2)
+            mock_start_process.assert_any_call(0, 0, 2, kwargs=None)
+            mock_start_process.assert_any_call(1, 1, 2, kwargs=None)
             
             # Verify monitoring loop
             mock_check_processes.assert_called_once()
@@ -471,12 +472,7 @@ class TestProcessManagerIntegration:
         self.chunk_lock_dir = os.path.join(self.temp_dir, "chunk_locks")
         
         # Create a simple test script that exits successfully
-        self.test_script = os.path.join(self.temp_dir, "test_script.py")
-        with open(self.test_script, 'w') as f:
-            f.write('#!/usr/bin/env python3\n')
-            f.write('import sys\n')
-            f.write('print("Test script executed successfully")\n')
-            f.write('sys.exit(0)\n')
+        self.test_script = os.path.join(os.path.dirname(__file__), 'dummy_script.py')
         
         self.config = {
             'script_path': self.test_script,
@@ -502,8 +498,7 @@ class TestProcessManagerIntegration:
             assert os.path.exists(pm.chunk_lock_manager.lock_dir)
             assert os.path.exists(pm.chunk_lock_manager.completion_dir)
     
-    @patch('src.octorun.runner.time.sleep')
-    def test_integration_process_lifecycle(self, mock_sleep):
+    def test_integration_process_lifecycle(self):
         """Test complete process lifecycle with real subprocess"""
         with patch.object(ProcessManager, 'log_message'):
             pm = ProcessManager(self.config)

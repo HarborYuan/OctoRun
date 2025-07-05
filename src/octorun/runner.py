@@ -54,7 +54,13 @@ class ProcessManager:
         with open(self.session_log, 'a') as f:
             f.write(log_entry + "\n")
 
-    def start_process(self, gpu_id: int, chunk_id: int, total_chunks: int) -> Optional[subprocess.Popen]:
+    def start_process(
+            self, 
+            gpu_id: int, 
+            chunk_id: int, 
+            total_chunks: int,
+            kwargs: Optional[Dict] = None,
+        ) -> Optional[subprocess.Popen]:
         """Start a process on a specific GPU"""
         try:
             cmd = [
@@ -64,6 +70,10 @@ class ProcessManager:
                 '--chunk_id', str(chunk_id),
                 '--total_chunks', str(total_chunks),
             ]
+            if kwargs:
+                for key, value in kwargs.items():
+                    cmd.append(f'--{key}')
+                    cmd.append(str(value))
             # Setup environment
             env = os.environ.copy()
 
@@ -160,7 +170,7 @@ class ProcessManager:
             'running_chunks': sorted(currently_running)
         }
 
-    def run(self, gpu_ids: List[int], total_chunks: int):
+    def run(self, gpu_ids: List[int], total_chunks: int, kwargs: Optional[Dict] = None):
         """Main execution loop with lock-based chunk assignment"""
         self.log_message(f"Starting processing with {len(gpu_ids)} GPUs and {total_chunks} chunks")
         self.log_message(f"GPU IDs: {gpu_ids}")
@@ -175,8 +185,7 @@ class ProcessManager:
                 )
                 
                 if chunk_id is not None:
-                    self.start_process(gpu_id, chunk_id, total_chunks)
-                    time.sleep(2)  # Stagger starts
+                    self.start_process(gpu_id, chunk_id, total_chunks, kwargs=kwargs)
                 else:
                     self.log_message(f"No available chunks for GPU {gpu_id} at startup")
             
@@ -208,7 +217,7 @@ class ProcessManager:
                         )
 
                         if next_chunk is not None:
-                            self.start_process(gpu_id, next_chunk, total_chunks)
+                            self.start_process(gpu_id, next_chunk, total_chunks, kwargs=kwargs)
                         else:
                             self.log_message(f"No more chunks available for GPU {gpu_id}")
 

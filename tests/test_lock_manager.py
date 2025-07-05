@@ -1,10 +1,7 @@
-import datetime
 import os
 import tempfile
 import shutil
-import socket
 from unittest.mock import patch, mock_open
-import pytest
 
 from src.octorun.lock_manager import ChunkLockManager
 
