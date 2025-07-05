@@ -1,9 +1,9 @@
 {
-    "script_path": "sleeper",
+    "script_path": "./tests/dummy_script.py",
     "gpus": "auto",
-    "max_concurrent": 4,
-    "log_dir": "logs",
-    "chunk_lock_dir": "locks",
+    "total_chunks": 128,
+    "log_dir": "./logs",
+    "chunk_lock_dir": "./logs/locks",
     "monitor_interval": 60,
     "restart_failed": false,
     "max_retries": 3,
