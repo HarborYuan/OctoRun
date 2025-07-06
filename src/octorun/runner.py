@@ -164,7 +164,7 @@ class ProcessManager:
         return {
             'completed_count': len(all_completed),
             'running_count': len(currently_running),
-            'remaining_count': total_chunks - len(all_completed) - len(currently_running),
+            'failed_count': len(self.failed_chunks),
             'completion_percentage': (len(all_completed) / total_chunks) * 100,
             'completed_chunks': sorted(all_completed),
             'running_chunks': sorted(currently_running)
@@ -197,7 +197,11 @@ class ProcessManager:
                 if completion_status['completed_count'] >= total_chunks:
                     self.log_message("All chunks completed!")
                     break
-                
+
+                if completion_status['failed_count'] + completion_status['completed_count'] >= total_chunks:
+                    self.log_message("All chunks either completed or failed!")
+                    break
+
                 time.sleep(self.config['monitor_interval'])
                 
                 status = self.check_processes()
@@ -221,11 +225,13 @@ class ProcessManager:
                         else:
                             self.log_message(f"No more chunks available for GPU {gpu_id}")
 
+                        del self.processes[chunk_id]  # Remove finished chunk from tracking
                 # Print status update
                 running_count = len(status['running'])
                 global_completed = completion_status['completed_count']
                 failed_count = len([c for c in self.failed_chunks 
-                                  if self.retry_count.get(c, 0) >= self.config['max_retries']])
+                                    if not self.config['restart_failed'] or
+                                    self.retry_count.get(c, 0) >= self.config['max_retries']])
                 
                 self.log_message(f"Status: {running_count} running, {global_completed} completed globally, {failed_count} permanently failed")
                 self.log_message(f"Progress: {completion_status['completion_percentage']:.1f}% ({global_completed}/{total_chunks})")
