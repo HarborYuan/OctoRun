@@ -202,6 +202,15 @@ def main():
     
     args = parser.parse_args()
     
+    # 🎮 Device handling - Set the GPU device
+    # This is an exmple when using PyTorch
+    import torch
+    if torch.cuda.is_available():
+        torch.cuda.set_device(args.gpu_id)
+        print(f"🎮 Using GPU {args.gpu_id}: {torch.cuda.get_device_name(args.gpu_id)}")
+    else:
+        print("⚠️  CUDA not available, using CPU")
+    
     # ✨ Use the arguments in your script
     print(f"🚀 Processing chunk {args.chunk_id}/{args.total_chunks} on GPU {args.gpu_id}")
     print(f"🎯 Training with batch_size={args.batch_size}, lr={args.learning_rate}")

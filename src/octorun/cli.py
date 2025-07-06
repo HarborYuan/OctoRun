@@ -60,23 +60,57 @@ def get_gpu_info(gpu_id: int) -> Optional[Dict]:
         Optional[Dict]: GPU information dictionary or None if error
     """
     try:
+        # Get basic GPU information
         result = subprocess.run(
-            ["nvidia-smi", "-i", str(gpu_id), "--query-gpu=index,name,memory.free,memory.total,utilization.gpu", "--format=csv,noheader,nounits"],
+            ["nvidia-smi", "-i", str(gpu_id), "--query-gpu=index,name,memory.free,memory.total,utilization.gpu,utilization.memory,temperature.gpu,power.draw,power.limit", "--format=csv,noheader,nounits"],
             capture_output=True,
             text=True,
             check=True
         )
         
         line = result.stdout.strip()
-        if line:
-            parts = line.split(', ')
-            return {
-                'id': int(parts[0]),
-                'name': parts[1],
-                'memory_free': int(parts[2]),
-                'memory_total': int(parts[3]),
-                'utilization': int(parts[4])
-            }
+        if not line:
+            return None
+            
+        parts = line.split(', ')
+        gpu_info = {
+            'id': int(parts[0]),
+            'name': parts[1],
+            'memory_free': int(parts[2]),
+            'memory_total': int(parts[3]),
+            'utilization_gpu': int(parts[4]),
+            'utilization_memory': int(parts[5]),
+            'temperature': int(parts[6]),
+            'power_draw': float(parts[7]),
+            'power_limit': float(parts[8])
+        }
+        
+        # Get running processes on this GPU
+        try:
+            process_result = subprocess.run(
+                ["nvidia-smi", "-i", str(gpu_id), "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            processes = []
+            for process_line in process_result.stdout.strip().split('\n'):
+                if process_line.strip():
+                    process_parts = process_line.split(', ')
+                    if len(process_parts) >= 3:
+                        processes.append({
+                            'pid': int(process_parts[0]),
+                            'process_name': process_parts[1],
+                            'used_memory': int(process_parts[2])
+                        })
+            
+            gpu_info['processes'] = processes
+            
+        except (subprocess.CalledProcessError, ValueError):
+            gpu_info['processes'] = []
+        
+        return gpu_info
     
     except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as e:
         print(f"Warning: Could not get GPU {gpu_id} info: {e}")
@@ -235,9 +269,19 @@ def cmd_list_gpus(args: argparse.Namespace) -> int:
         for gpu_id in available_gpus:
             gpu_info = get_gpu_info(gpu_id)
             if gpu_info:
-                print(f"  GPU {gpu_id}: {gpu_info['name']}")
-                print(f"    Memory: {gpu_info['memory_free']}MB free / {gpu_info['memory_total']}MB total")
-                print(f"    Utilization: {gpu_info['utilization']}%")
+                print(f"\n  🎮 GPU {gpu_id}: {gpu_info['name']}")
+                print(f"    💾 Memory: {gpu_info['memory_free']}MB free / {gpu_info['memory_total']}MB total ({(gpu_info['memory_total'] - gpu_info['memory_free']) / gpu_info['memory_total'] * 100:.1f}% used)")
+                print(f"    ⚡ GPU Utilization: {gpu_info['utilization_gpu']}%")
+                print(f"    🧠 Memory Utilization: {gpu_info['utilization_memory']}%")
+                print(f"    🌡️  Temperature: {gpu_info['temperature']}°C")
+                print(f"    🔋 Power: {gpu_info['power_draw']:.1f}W / {gpu_info['power_limit']:.1f}W ({gpu_info['power_draw'] / gpu_info['power_limit'] * 100:.1f}%)")
+                
+                if gpu_info['processes']:
+                    print(f"    👥 Running Processes ({len(gpu_info['processes'])}):")
+                    for process in gpu_info['processes']:
+                        print(f"      • PID {process['pid']}: {process['process_name']} ({process['used_memory']}MB)")
+                else:
+                    print(f"    👥 Running Processes: None")
             else:
                 print(f"  GPU {gpu_id}: Could not get detailed info")
     else:

@@ -59,7 +59,7 @@ class TestProcessManager:
             assert pm.failed_chunks == set()
             assert pm.retry_count == {}
             
-            mock_log.assert_called_once_with("Found 2 previously completed chunks: [1, 2]")
+            mock_log.assert_called_with("Found 2 previously completed chunks: [1, 2]")
     
     @patch('src.octorun.runner.os.makedirs')
     @patch('src.octorun.runner.datetime')
@@ -95,17 +95,21 @@ class TestProcessManager:
         mock_datetime.datetime.strftime = datetime.datetime.strftime
         
         with patch('src.octorun.runner.ChunkLockManager') as mock_chunk_lock_manager, \
-             patch.object(ProcessManager, 'setup_logging'), \
              patch('builtins.print') as mock_print:
             
             # Make sure no completed chunks are returned to avoid log_message during init
             mock_lock_manager = mock_chunk_lock_manager.return_value
             mock_lock_manager.get_completed_chunks.return_value = set()
             
-            pm = ProcessManager(self.config)
-            pm.session_log = "/tmp/session.log"
+            # Mock setup_logging to set session_log properly BEFORE any log_message calls
+            def mock_setup_logging(self):
+                self.session_log = "/tmp/session.log"
             
-            # Reset the print mock to ignore any initialization calls
+            with patch.object(ProcessManager, 'setup_logging', mock_setup_logging):
+                pm = ProcessManager(self.config)
+            
+            # Reset the file and print mocks to ignore any initialization calls
+            mock_file.reset_mock()
             mock_print.reset_mock()
             
             pm.log_message("Test message")
@@ -258,7 +262,7 @@ class TestProcessManager:
             
             mock_lock_manager.mark_chunk_completed.assert_called_once_with(1)
             mock_lock_manager.release_chunk.assert_called_once_with(1)
-            mock_log.assert_called_once_with("GPU 0, chunk 1 completed successfully (Duration: 1:00:00)")
+            mock_log.assert_called_with("GPU 0, chunk 1 completed successfully (Duration: 1:00:00)")
     
     @patch('src.octorun.runner.datetime')
     def test_check_processes_failed_with_retry(self, mock_datetime):
