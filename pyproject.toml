@@ -1,16 +1,25 @@
 [project]
 name = "octorun"
 version = "0.1.0"
-description = "A command-line tool for running tasks and scripts"
+description = "A command-line tool for distributed parallel execution across multiple GPUs"
 readme = "README.md"
 authors = [
     { name = "Haobo Yuan", email = "haoboyuan@ucmerced.edu" }
 ]
+maintainers = [
+    { name = "Haobo Yuan", email = "haoboyuan@ucmerced.edu" }
+]
+license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = []
+keywords = ["gpu", "parallel", "distributed", "deep-learning", "cli"]
 
 [project.scripts]
 octorun = "octorun.cli:cli_main"
+
+[project.urls]
+Homepage = "https://github.com/HarborYuan/OctoRun"
+Repository = "https://github.com/HarborYuan/OctoRun"
 
 [project.optional-dependencies]
 dev = [
