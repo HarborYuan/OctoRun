@@ -39,7 +39,9 @@ class ProcessManager:
 
         # Create session log
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.session_log = os.path.join(log_dir, f"session_{timestamp}.log")
+
+        machine_name = os.uname().nodename
+        self.session_log = os.path.join(log_dir, f"{machine_name}_session_{timestamp}.log")
 
         with open(self.session_log, 'w') as f:
             f.write(f"Session Started: {self.start_time}\n")
@@ -54,6 +56,30 @@ class ProcessManager:
         
         with open(self.session_log, 'a') as f:
             f.write(log_entry + "\n")
+
+    def read_and_print_process_errors(self, chunk_id: int, log_file: str, num_lines: int = 20):
+        """Read and print the last few lines of a failed process log file"""
+        try:
+            if os.path.exists(log_file):
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                    
+                if lines:
+                    # Get the last num_lines lines
+                    error_lines = lines[-num_lines:] if len(lines) >= num_lines else lines
+                    
+                    self.log_message(f"Error details for chunk {chunk_id} (last {min(len(lines), num_lines)} lines):")
+                    self.log_message("-" * 60)
+                    for line in error_lines:
+                        # Remove trailing newline and log each line
+                        self.log_message(line.rstrip())
+                    self.log_message("-" * 60)
+                else:
+                    self.log_message(f"Log file for chunk {chunk_id} is empty")
+            else:
+                self.log_message(f"Log file for chunk {chunk_id} not found: {log_file}")
+        except Exception as e:
+            self.log_message(f"Error reading log file for chunk {chunk_id}: {e}")
 
     def start_process(
             self, 
@@ -148,6 +174,9 @@ class ProcessManager:
                     self.chunk_lock_manager.release_chunk(chunk_id)
                     
                     self.log_message(f"GPU {proc_info['gpu_id']}, chunk {chunk_id} failed with return code {return_code}")
+                    
+                    # Read and print error details from the log file
+                    self.read_and_print_process_errors(chunk_id, proc_info['log_file'])
                     
                     # Handle retries
                     if self.config['restart_failed'] and self.retry_count.get(chunk_id, 0) < self.config['max_retries']:

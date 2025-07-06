@@ -62,13 +62,19 @@ class TestProcessManager:
             mock_log.assert_called_with("Found 2 previously completed chunks: [1, 2]")
     
     @patch('src.octorun.runner.os.makedirs')
+    @patch('src.octorun.runner.os.uname')
     @patch('src.octorun.runner.datetime')
     @patch('builtins.open', new_callable=mock_open)
-    def test_setup_logging(self, mock_file, mock_datetime, mock_makedirs):
+    def test_setup_logging(self, mock_file, mock_datetime, mock_uname, mock_makedirs):
         """Test setup_logging method"""
         mock_start_time = datetime.datetime(2025, 6, 27, 10, 30, 45)
         mock_datetime.datetime.now.return_value = mock_start_time
         mock_datetime.datetime.strftime = datetime.datetime.strftime
+        
+        # Mock machine name
+        mock_uname_result = MagicMock()
+        mock_uname_result.nodename = "test-machine"
+        mock_uname.return_value = mock_uname_result
         
         with patch('src.octorun.runner.ChunkLockManager'), \
              patch.object(ProcessManager, 'log_message'):
@@ -78,7 +84,7 @@ class TestProcessManager:
             
             # Verify the expected calls were made
             mock_makedirs.assert_called_once_with(self.log_dir, exist_ok=True)
-            expected_session_log = os.path.join(self.log_dir, "session_20250627_103045.log")
+            expected_session_log = os.path.join(self.log_dir, "test-machine_session_20250627_103045.log")
             assert pm.session_log == expected_session_log
             
             # Check file was opened and written to
@@ -302,6 +308,7 @@ class TestProcessManager:
             mock_lock_manager.release_chunk.assert_called_once_with(1)
             expected_calls = [
                 call("GPU 0, chunk 1 failed with return code 1"),
+                call("Log file for chunk 1 not found: /tmp/chunk_1.log"),
                 call("Scheduling retry 1/2 for chunk 1")
             ]
             mock_log.assert_has_calls(expected_calls)
