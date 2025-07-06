@@ -33,16 +33,24 @@
 
 ## 🚀 Installation
 
+### Quick Run via uv (Without Installation) 
+```bash
+uvx octorun [run, save_config, list_gpus]
+```
+
+### Via uv (Installation, Globally) 
+```bash
+uv tool install octorun
+```
+
+### Via uv (Install in Your Own Project)
+```bash
+uv add octorun
+```
+
 ### Via pip
 ```bash
 pip install octorun
-```
-
-### From source
-```bash
-git clone https://github.com/HarborYuan/OctoRun.git
-cd OctoRun
-pip install -e .
 ```
 
 ## ⚡ Quick Start
