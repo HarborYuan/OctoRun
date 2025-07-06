@@ -6,7 +6,7 @@
 
 *A powerful command-line tool for running Python scripts across multiple GPUs with intelligent task management and monitoring*
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/HarborYuan/OctoRun/releases)
+[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/HarborYuan/OctoRun/releases)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![CUDA](https://img.shields.io/badge/CUDA-supported-green.svg)](https://developer.nvidia.com/cuda-downloads)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

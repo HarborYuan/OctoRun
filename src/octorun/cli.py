@@ -296,7 +296,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     
     if args.verbose:
-        print(f"octorun v0.1.0")
+        print(f"octorun v0.1.1")
         print(f"Command: {args.command}")
     
     # Dispatch to command handler
