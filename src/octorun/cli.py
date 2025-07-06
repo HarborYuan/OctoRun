@@ -212,8 +212,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     # First, load kwargs from config file
     if "kwargs" in config:
         kwargs.update(config["kwargs"])
-        config.pop("kwargs", None)  # Remove from config to avoid duplication
         print(f"Loaded kwargs from config: {config['kwargs']}")
+        config.pop("kwargs", None)  # Remove from config to avoid duplication
 
     # Then, override with CLI kwargs if provided
     if args.kwargs:

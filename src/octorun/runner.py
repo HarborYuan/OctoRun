@@ -68,12 +68,19 @@ class ProcessManager:
                     # Get the last num_lines lines
                     error_lines = lines[-num_lines:] if len(lines) >= num_lines else lines
                     
-                    self.log_message(f"Error details for chunk {chunk_id} (last {min(len(lines), num_lines)} lines):")
-                    self.log_message("-" * 60)
-                    for line in error_lines:
-                        # Remove trailing newline and log each line
-                        self.log_message(line.rstrip())
-                    self.log_message("-" * 60)
+                    # Log error details with improved formatting
+                    self.log_message("")  # Empty line for spacing
+                    self.log_message(f"ERROR DETAILS - Chunk {chunk_id} (showing last {min(len(lines), num_lines)} lines):")
+                    self.log_message("=" * 80)
+                    
+                    for i, line in enumerate(error_lines, 1):
+                        # Add line numbers and clean formatting
+                        line_content = line.rstrip()
+                        if line_content:  # Skip empty lines
+                            self.log_message(f"{i:2d}: {line_content}")
+                    
+                    self.log_message("=" * 80)
+                    self.log_message("")  # Empty line for spacing
                 else:
                     self.log_message(f"Log file for chunk {chunk_id} is empty")
             else:
