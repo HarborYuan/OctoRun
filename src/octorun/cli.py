@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import subprocess
+import pwd
 from typing import Dict, List, Optional, Dict
 
 from . import __version__ as version
@@ -99,10 +100,13 @@ def get_gpu_info(gpu_id: int) -> Optional[Dict]:
                 if process_line.strip():
                     process_parts = process_line.split(', ')
                     if len(process_parts) >= 3:
+                        pid = int(process_parts[0])
+                        username = get_process_username(pid)
                         processes.append({
-                            'pid': int(process_parts[0]),
+                            'pid': pid,
                             'process_name': process_parts[1],
-                            'used_memory': int(process_parts[2])
+                            'used_memory': int(process_parts[2]),
+                            'username': username
                         })
             
             gpu_info['processes'] = processes
@@ -147,8 +151,11 @@ def create_parser() -> argparse.ArgumentParser:
     # Run command (example for running something)
     run_parser = subparsers.add_parser(
         "run",
+        aliases=["r"],
+        description="Run a task or script",
         help="Run a task or script",
     )
+    run_parser.set_defaults(command="run")
     run_parser.add_argument(
         "--config",
         type=str,
@@ -162,8 +169,10 @@ def create_parser() -> argparse.ArgumentParser:
     )
     save_config_parser = subparsers.add_parser(
         "save_config",
+        aliases=["s"],
         help="Save default configuration to ./config.json",
     )
+    save_config_parser.set_defaults(command="save_config")
     save_config_parser.add_argument(
         "--script",
         type=str,
@@ -174,10 +183,14 @@ def create_parser() -> argparse.ArgumentParser:
     # List GPUs command
     list_gpus_parser = subparsers.add_parser(
         "list_gpus",
+        aliases=["l"],
+        description="List available GPUs",
         help="List available GPUs",
     )
+    list_gpus_parser.set_defaults(command="list_gpus")
     list_gpus_parser.add_argument(
         "--detailed",
+        "-d",
         action="store_true",
         help="Show detailed GPU information",
     )
@@ -279,7 +292,8 @@ def cmd_list_gpus(args: argparse.Namespace) -> int:
                 if gpu_info['processes']:
                     print(f"    👥 Running Processes ({len(gpu_info['processes'])}):")
                     for process in gpu_info['processes']:
-                        print(f"      • PID {process['pid']}: {process['process_name']} ({process['used_memory']}MB)")
+                        username_str = f" (user: {process['username']})" if process['username'] else ""
+                        print(f"      • PID {process['pid']}: {process['process_name']} ({process['used_memory']}MB){username_str}")
                 else:
                     print(f"    👥 Running Processes: None")
             else:
@@ -288,6 +302,28 @@ def cmd_list_gpus(args: argparse.Namespace) -> int:
         print(f"  GPU IDs: {', '.join(map(str, available_gpus))}")
     
     return 0
+
+
+def get_process_username(pid: int) -> Optional[str]:
+    """
+    Get the username of a process given its PID.
+    
+    Args:
+        pid (int): Process ID
+        
+    Returns:
+        Optional[str]: Username or None if not found
+    """
+    try:
+        # Get process owner UID from /proc/PID/status
+        with open(f"/proc/{pid}/status", "r") as f:
+            for line in f:
+                if line.startswith("Uid:"):
+                    uid = int(line.split()[1])  # Real UID is the second field
+                    return pwd.getpwuid(uid).pw_name
+    except (FileNotFoundError, PermissionError, KeyError, IndexError, ValueError):
+        pass
+    return None
 
 
 def main(argv: Optional[List[str]] = None) -> int:

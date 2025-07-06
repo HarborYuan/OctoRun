@@ -24,8 +24,6 @@ Repository = "https://github.com/HarborYuan/OctoRun"
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
-    "black>=22.0",
-    "ruff>=0.1.0",
 ]
 
 [build-system]

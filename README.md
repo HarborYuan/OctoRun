@@ -63,6 +63,10 @@ pip install octorun
 ```bash
 octorun save_config --script ./your_script.py
 ```
+or
+```bash
+octorun s --script ./your_script.py
+```
 
 </td>
 <td>
@@ -71,7 +75,10 @@ octorun save_config --script ./your_script.py
 ```bash
 octorun run [--config config.json]
 ```
-
+or
+```bash
+octorun r
+```
 </td>
 </tr>
 <tr>
@@ -81,7 +88,10 @@ octorun run [--config config.json]
 ```bash
 octorun list_gpus [--detailed]
 ```
-
+or
+```bash
+octorun l -d
+```
 </td>
 <td>
 
@@ -89,7 +99,10 @@ octorun list_gpus [--detailed]
 ```bash
 tail -f logs/session_*.log
 ```
-
+and
+```bash
+tail -f logs/chunk_*.log
+```
 </td>
 </tr>
 </table>
@@ -193,7 +206,7 @@ def main():
     parser.add_argument('--chunk_id', type=int, required=True)
     parser.add_argument('--total_chunks', type=int, required=True)
     
-    # 🎯 Your custom arguments
+    # 🎯 Your custom arguments (Optional)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--learning_rate', type=float, default=0.001)
     parser.add_argument('--model_type', type=str, default='default')
@@ -224,7 +237,7 @@ if __name__ == "__main__":
 
 ## 🎮 Commands
 
-### 🚀 `run`
+### 🚀 `run` (r)
 
 Run your script with the specified configuration:
 
@@ -232,7 +245,7 @@ Run your script with the specified configuration:
 octorun run --config config.json [--kwargs '{"key": "value"}']
 ```
 
-### 💾 `save_config`
+### 💾 `save_config` (s)
 
 Generate a default configuration file:
 
@@ -240,7 +253,7 @@ Generate a default configuration file:
 octorun save_config [--script ./your_script.py]
 ```
 
-### 🔍 `list_gpus`
+### 🔍 `list_gpus` (l)
 
 List available GPUs:
 
