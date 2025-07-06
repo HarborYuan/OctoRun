@@ -1,7 +1,11 @@
 {
-    "script_path": "./tests/dummy_script.py",
     "gpus": "auto",
     "total_chunks": 128,
+    "kwargs": {
+        "batch_size": 32,
+        "learning_rate": 0.001
+    },
+    "script_path": "./tests/dummy_script.py",
     "log_dir": "./logs",
     "chunk_lock_dir": "./logs/locks",
     "monitor_interval": 60,

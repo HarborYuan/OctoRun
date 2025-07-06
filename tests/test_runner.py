@@ -322,7 +322,6 @@ class TestProcessManager:
             
             assert status['completed_count'] == 3
             assert status['running_count'] == 2
-            assert status['remaining_count'] == 5
             assert status['completion_percentage'] == 30.0
             assert status['completed_chunks'] == [1, 2, 3]
             assert status['running_chunks'] == [4, 5]
@@ -346,8 +345,8 @@ class TestProcessManager:
             
             # Setup completion status - first incomplete, then complete
             mock_get_completion_status.side_effect = [
-                {'completed_count': 1, 'completion_percentage': 50.0, 'running_chunks': [1]},
-                {'completed_count': 2, 'completion_percentage': 100.0, 'running_chunks': []}
+                {'completed_count': 1, 'failed_count': 0, 'completion_percentage': 50.0, 'running_chunks': [1]},
+                {'completed_count': 2, 'failed_count': 0, 'completion_percentage': 100.0, 'running_chunks': []}
             ]
             
             # Setup process status

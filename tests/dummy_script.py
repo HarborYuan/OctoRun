@@ -20,10 +20,22 @@ def main():
     parser.add_argument('--sleep_time', type=float, default=0.1, help='Time to sleep (simulating work)')
     parser.add_argument('--fail_chunk_ids', type=str, default='', help='Comma-separated chunk IDs that should fail')
     
+    # Add common ML/training kwargs that can be passed through
+    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for processing')
+    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate')
+    parser.add_argument('--model_type', type=str, default='default', help='Model type to use')
+    parser.add_argument('--epochs', type=int, default=1, help='Number of epochs')
+    parser.add_argument('--output_dir', type=str, default='./output', help='Output directory')
+    
     args = parser.parse_args()
     
     print(f"Starting processing: GPU {args.gpu_id}, Chunk {args.chunk_id}/{args.total_chunks}")
     print(f"PID: {os.getpid()}")
+    print(f"Configuration: batch_size={args.batch_size}, learning_rate={args.learning_rate}, model_type={args.model_type}")
+    if args.epochs > 1:
+        print(f"Training for {args.epochs} epochs")
+    if args.output_dir != './output':
+        print(f"Output directory: {args.output_dir}")
     
     # Parse fail_chunk_ids
     fail_chunk_ids = set()

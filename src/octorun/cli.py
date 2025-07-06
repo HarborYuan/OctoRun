@@ -121,6 +121,11 @@ def create_parser() -> argparse.ArgumentParser:
         default="config.json",
         help="Path to the configuration file",
     )
+    run_parser.add_argument(
+        "--kwargs",
+        type=str,
+        help="Additional keyword arguments as JSON string (e.g., '{\"batch_size\": 32, \"lr\": 0.001}')",
+    )
     save_config_parser = subparsers.add_parser(
         "save_config",
         help="Save default configuration to ./config.json",
@@ -151,8 +156,31 @@ def cmd_run(args: argparse.Namespace) -> int:
     # Here you would implement the actual run logic
     print(f"Running {args.config}...")
     config = json.load(open(args.config, "r"))
+
+    # parse configs
+    gpus = config.pop("gpus", "auto")
+    total_chunks = config.pop("total_chunks", 128)
+    # Handle kwargs from config file and CLI
+    kwargs = {}
+    # First, load kwargs from config file
+    if "kwargs" in config:
+        kwargs.update(config["kwargs"])
+        config.pop("kwargs", None)  # Remove from config to avoid duplication
+        print(f"Loaded kwargs from config: {config['kwargs']}")
+
+    # Then, override with CLI kwargs if provided
+    if args.kwargs:
+        try:
+            cli_kwargs = json.loads(args.kwargs)
+            kwargs.update(cli_kwargs)
+            print(f"Added/overrode kwargs from CLI: {cli_kwargs}")
+        except json.JSONDecodeError as e:
+            print(f"Error parsing CLI kwargs JSON: {e}")
+            return 1
+    if kwargs:
+        print(f"Final kwargs: {kwargs}")
+
     pm = ProcessManager(config)
-    gpus = config.get("gpu_ids", "auto")
     if gpus == "auto":
         print("Using automatic GPU detection.")
         available_gpus = get_available_gpus()
@@ -170,8 +198,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     else:
         raise ValueError(f"Invalid GPU configuration: {gpus}")
     
-    total_chunks = config.get("total_chunks", 128)
-    pm.run(gpu_ids=gpus, total_chunks=total_chunks, kwargs={})
+    pm.run(gpu_ids=gpus, total_chunks=total_chunks, kwargs=kwargs)
     return 0
 
 

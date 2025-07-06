@@ -26,6 +26,7 @@ class ProcessManager:
 
         # Setup logging
         self.setup_logging()
+        self.log_message(f"ProcessManager initialized with configuration: {json.dumps(self.config, indent=2)}")
 
         # Log already completed chunks
         if self.completed_chunks:
