@@ -195,6 +195,44 @@ def create_parser() -> argparse.ArgumentParser:
         help="Show detailed GPU information",
     )
     
+    # GPU Benchmark command
+    benchmark_parser = subparsers.add_parser(
+        "benchmark",
+        aliases=["b"],
+        description="Continuously test GPU performance (TFLOPs and communication)",
+        help="Continuously test GPU performance (TFLOPs and communication)",
+    )
+    benchmark_parser.set_defaults(command="benchmark")
+    benchmark_parser.add_argument(
+        "--gpus",
+        "-g",
+        type=str,
+        default="auto",
+        help="GPU IDs to test (comma-separated, e.g., '0,1,2' or 'auto' for all available)",
+    )
+    benchmark_parser.add_argument(
+        "--test-duration",
+        "-t",
+        type=float,
+        default=10.,
+        help="Duration of each test in seconds (default: 10.0)",
+    )
+    benchmark_parser.add_argument(
+        "--interval",
+        "-i",
+        type=float,
+        default=15.,
+        help="Interval between tests in seconds (default: 30.0)",
+    )
+    benchmark_parser.add_argument(
+        "--mode",
+        "-m",
+        type=str,
+        choices=['single', 'p2p', ],
+        default='single',
+        help="Benchmark mode: 'single' for single GPU, 'p2p' for peer-to-peer communication",
+    )
+    
     return parser
 
 
@@ -266,6 +304,46 @@ def cmd_save_config(args: argparse.Namespace) -> int:
         json.dump(default_config, config_file, indent=4)
     print("Default configuration saved.")
     return 0
+
+
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    """Handle the benchmark command."""
+    from .gpu_benchmark import run_gpu_benchmark
+    
+    # Parse GPU IDs
+    if args.gpus.lower() == "auto":
+        gpu_ids = None  # Auto-detect
+    else:
+        try:
+            gpu_ids = [int(x.strip()) for x in args.gpus.split(',')]
+        except ValueError:
+            print(f"❌ Invalid GPU IDs format: {args.gpus}")
+            print("📋 Use comma-separated integers (e.g., '0,1,2') or 'auto'")
+            return 1
+    
+    if args.verbose:
+        print(f"🚀 Starting GPU benchmark...")
+        if gpu_ids:
+            print(f"🎯 Target GPUs: {gpu_ids}")
+        else:
+            print(f"🔍 Auto-detecting GPUs...")
+        print(f"⏱️  Test duration: {args.test_duration}s")
+        print(f"📊 Test interval: {args.interval}s")
+    
+    try:
+        run_gpu_benchmark(
+            gpu_ids=gpu_ids,
+            test_duration=args.test_duration,
+            test_interval=args.interval,
+            mode=args.mode
+        )
+        return 0
+    except KeyboardInterrupt:
+        print("\n🛑 Benchmark interrupted by user")
+        return 0
+    except Exception as e:
+        print(f"❌ Benchmark failed: {e}")
+        return 1
 
 
 def cmd_list_gpus(args: argparse.Namespace) -> int:
@@ -342,6 +420,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_save_config(args)
     elif args.command == "list_gpus":
         return cmd_list_gpus(args)
+    elif args.command == "benchmark":
+        return cmd_benchmark(args)
     else:
         parser.print_help()
         return 1
