@@ -27,11 +27,12 @@ def test_memory_bandwidth_torch(gpu_id, duration=5.0):
     torch.cuda.set_device(device)
     
     # Test different memory operations
-    size = 256 * 1024 * 1024  # 256M elements
+    size = 128 * 1024 * 1024  # 128M elements
+    dtype = torch.float32 # cpu does not support bf16
     
     # Memory copy test
-    data = torch.randn(size, device=device, dtype=torch.float32)
-    bytes_per_element = 4  # float32
+    data = torch.randn(size, device='cpu', dtype=dtype)
+    bytes_per_element = data.element_size()
     
     operations = 0
     start_time = time.time()
@@ -39,7 +40,7 @@ def test_memory_bandwidth_torch(gpu_id, duration=5.0):
     while (time.time() - start_time) < duration:
         torch.cuda.synchronize()
         # Copy operation
-        data_copy = data.clone()
+        data_copy = data.to(device=device)
         torch.cuda.synchronize()
         operations += 1
     
@@ -50,11 +51,16 @@ def test_memory_bandwidth_torch(gpu_id, duration=5.0):
     bytes_transferred = operations * size * bytes_per_element
     bandwidth_gbps = (bytes_transferred / total_time) / 1e9  # GB/s
     
+    memory_used_gb = torch.cuda.memory_allocated(device) / 1e9
+    
     return {
         "bandwidth_gbps": bandwidth_gbps,
         "operations": operations,
         "duration": total_time,
         "data_size_mb": (size * bytes_per_element) / 1e6,
+        "size": size,
+        "dtype": dtype.__str__().split('.')[-1],
+        "memory_used_gb": memory_used_gb,
         "framework": "pytorch"
     }
 

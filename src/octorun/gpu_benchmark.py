@@ -19,7 +19,7 @@ class GPUBenchmark:
     Continuous GPU performance testing for speed (TFLOPs) and memory bandwidth.
     """
 
-    def __init__(self, gpu_ids: List[int], test_duration: float = 10.0, test_interval: float = 30.0):
+    def __init__(self, gpu_ids: List[int], test_duration: float = 5.0, test_interval: float = 10.0):
         """
         Initialize GPU benchmark.
         
@@ -106,10 +106,10 @@ class GPUBenchmark:
             
             # Run the test script (use fixed 5 second duration for memory tests)
             result = subprocess.run(
-                ['python', script_path, str(gpu_id), '5.0'],
+                ['python', script_path, str(gpu_id), str(self.test_duration)],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=self.test_duration + 10
             )
             
             if result.returncode == 0:
@@ -129,17 +129,15 @@ class GPUBenchmark:
         Args:
             gpu_id: GPU ID to benchmark
         """
-        print(f"🚀 Starting benchmark worker for GPU {gpu_id}")
+        # print(f"🚀 Starting benchmark worker for GPU {gpu_id}")
         
         while self.running:
             try:
                 self.results[gpu_id]['status'] = 'testing'
                 test_start = time.time()
                 
-                print(f"🧪 Testing GPU {gpu_id} compute performance...")
                 compute_result = self._test_gpu_compute_performance(gpu_id)
                 
-                print(f"💾 Testing GPU {gpu_id} memory bandwidth...")
                 memory_result = self._test_gpu_memory_bandwidth(gpu_id)
                 
                 test_end = time.time()
@@ -157,9 +155,6 @@ class GPUBenchmark:
                 self.results[gpu_id]['last_test_time'] = timestamp
                 self.results[gpu_id]['status'] = 'idle'
                 
-                # Print results
-                self._print_gpu_results(gpu_id, compute_result, memory_result)
-                
                 # Wait for next test cycle
                 elapsed = test_end - test_start
                 sleep_time = max(0, self.test_interval - elapsed)
@@ -173,54 +168,83 @@ class GPUBenchmark:
                 time.sleep(5)  # Wait before retry
     
     
-    def _print_gpu_results(self, gpu_id: int, compute_result: Dict, memory_result: Dict):
-        """Print GPU performance results."""
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"\n📊 GPU {gpu_id} Performance Results ({timestamp})")
-        print("=" * 60)
+    def _print_results_table(self):
+        """Prints a formatted table of the latest benchmark results."""
+        # ANSI escape code to clear the screen and move cursor to top-left
+        print("\033[H\033[J", end="")
         
-        if 'error' not in compute_result:
-            print(f"🔥 Compute Performance:")
-            framework = compute_result.get('framework', 'unknown')
-            if 'tflops' in compute_result:
-                print(f"   TFLOPs: {compute_result.get('tflops', 0):.2f}")
-                print(f"   Operations: {compute_result.get('operations', 0)}")
-                print(f"   Matrix Size: {compute_result.get('matrix_size', 0)}")
-            elif 'estimated_utilization_percent' in compute_result:
-                print(f"   GPU Utilization: {compute_result.get('estimated_utilization_percent', 0):.1f}%")
-                print(f"   GPU Name: {compute_result.get('gpu_name', 'Unknown')}")
-            elif 'utilization_percent' in compute_result:
-                print(f"   GPU Utilization: {compute_result.get('utilization_percent', 0)}%")
-                print(f"   GPU Name: {compute_result.get('gpu_name', 'Unknown')}")
+        # Header
+        header = (
+            f"{'GPU':<3} | {'Status':<10} | {'TFLOPs':<8} | {'Mat':<8} | {'c_dtype':<7} | "
+            f"{'Mem Alloc':<10} | {'Mem Rsvd':<10} | {'Mem Copy':<15} | {'Mem Size':<8} | "
+            f"{'m_dtype':<7} | {'Last Test':<10}"
+        )
+        print(header)
+        print("-" * len(header))
+        
+        # Rows
+        for gpu_id in sorted(self.results.keys()):
+            result = self.results[gpu_id]
+            status = result.get('status', 'N/A')
             
-            if 'note' in compute_result:
-                print(f"   Note: {compute_result['note']}")
-            print(f"   Framework: {framework}")
-        else:
-            print(f"❌ Compute Test Error: {compute_result['error']}")
+            # Compute
+            last_compute = result['compute_history'][-1]['result'] if result['compute_history'] else {}
+            if 'tflops' in last_compute:
+                compute_str = f"{last_compute['tflops']:.2f}"
+            else:
+                compute_str = "N/A"
+            
+            mat_size = last_compute.get('matrix_size', 'N/A')
+            compute_dtype = last_compute.get('dtype', 'N/A')
+            if compute_dtype == 'float16':
+                compute_dtype = 'f16'
+            elif compute_dtype == 'float32':
+                compute_dtype = 'f32'
+            elif compute_dtype == 'bfloat16':
+                compute_dtype = 'bf16'
+
+            mem_alloc = last_compute.get('memory_allocated_gb', 'N/A')
+            mem_rsvd = last_compute.get('memory_reserved_gb', 'N/A')
+            if isinstance(mem_alloc, float):
+                mem_alloc = f"{mem_alloc:.2f}G"
+            if isinstance(mem_rsvd, float):
+                mem_rsvd = f"{mem_rsvd:.2f}G"
+
+            # Memory
+            last_memory = result['memory_history'][-1]['result'] if result['memory_history'] else {}
+            if 'bandwidth_gbps' in last_memory:
+                memory_str = f"{last_memory['bandwidth_gbps']:.2f} GB/s"
+            else:
+                memory_str = "N/A"
+
+            mem_size = last_memory.get('size', 'N/A')
+            if isinstance(mem_size, int):
+                mem_size = f"{mem_size / 1024**2:.0f}M"
+            memory_dtype = last_memory.get('dtype', 'N/A')
+            if memory_dtype == 'float16':
+                memory_dtype = 'f16'
+            elif memory_dtype == 'float32':
+                memory_dtype = 'f32'
+            elif memory_dtype == 'bfloat16':
+                memory_dtype = 'bf16'
+
+
+            # Last test time
+            last_test_time = result.get('last_test_time')
+            if last_test_time:
+                time_diff = datetime.datetime.now() - last_test_time
+                last_test_str = f"{int(time_diff.total_seconds())}s ago"
+            else:
+                last_test_str = "Never"
+            
+            row = (
+                f"{gpu_id:<3} | {status:<10} | {compute_str:<8} | {mat_size:<8} | {compute_dtype:<7} | "
+                f"{mem_alloc:<10} | {mem_rsvd:<10} | {memory_str:<15} | {mem_size:<8} | "
+                f"{memory_dtype:<7} | {last_test_str:<10}"
+            )
+            print(row)
         
-        if 'error' not in memory_result:
-            print(f"💾 Memory Performance:")
-            framework = memory_result.get('framework', 'unknown')
-            if 'bandwidth_gbps' in memory_result:
-                print(f"   Bandwidth: {memory_result.get('bandwidth_gbps', 0):.2f} GB/s")
-                print(f"   Operations: {memory_result.get('operations', 0)}")
-            elif 'memory_total_mb' in memory_result:
-                total_mb = memory_result.get('memory_total_mb', 0)
-                free_mb = memory_result.get('memory_free_mb', 0)
-                used_mb = memory_result.get('memory_used_mb', 0)
-                print(f"   Total Memory: {total_mb} MB")
-                print(f"   Free Memory: {free_mb} MB")
-                print(f"   Used Memory: {used_mb} MB")
-                print(f"   Usage: {(used_mb / total_mb * 100):.1f}%" if total_mb > 0 else "   Usage: N/A")
-                
-            if 'note' in memory_result:
-                print(f"   Note: {memory_result['note']}")
-            print(f"   Framework: {framework}")
-        else:
-            print(f"❌ Memory Test Error: {memory_result['error']}")
-        
-        print("=" * 60)
+        print("\nPress Ctrl+C to stop.")
     
     
     def start(self):
@@ -247,8 +271,9 @@ class GPUBenchmark:
             self.threads.append(thread)
         
         try:
-            # Keep main thread alive
+            # Keep main thread alive and refresh results
             while self.running:
+                self._print_results_table()
                 time.sleep(1)
         except KeyboardInterrupt:
             print("\n🛑 Stopping benchmark...")
@@ -270,8 +295,8 @@ class GPUBenchmark:
 
 
 def run_gpu_benchmark(gpu_ids: Optional[List[int]] = None, 
-                     test_duration: float = 10.0, 
-                     test_interval: float = 30.0):
+                     test_duration: float = 5.0, 
+                     test_interval: float = 10.0):
     """
     Run continuous GPU benchmark.
     

@@ -214,15 +214,15 @@ def create_parser() -> argparse.ArgumentParser:
         "--test-duration",
         "-t",
         type=float,
-        default=10.,
-        help="Duration of each test in seconds (default: 10.0)",
+        default=5.,
+        help="Duration of each test in seconds (default: 5.0)",
     )
     benchmark_parser.add_argument(
         "--interval",
         "-i",
         type=float,
-        default=15.,
-        help="Interval between tests in seconds (default: 30.0)",
+        default=10.,
+        help="Interval between tests in seconds (default: 10.0)",
     )
     
     return parser
