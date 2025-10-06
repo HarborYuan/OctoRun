@@ -224,14 +224,6 @@ def create_parser() -> argparse.ArgumentParser:
         default=15.,
         help="Interval between tests in seconds (default: 30.0)",
     )
-    benchmark_parser.add_argument(
-        "--mode",
-        "-m",
-        type=str,
-        choices=['single', 'p2p', ],
-        default='single',
-        help="Benchmark mode: 'single' for single GPU, 'p2p' for peer-to-peer communication",
-    )
     
     return parser
 
@@ -335,7 +327,6 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
             gpu_ids=gpu_ids,
             test_duration=args.test_duration,
             test_interval=args.interval,
-            mode=args.mode
         )
         return 0
     except KeyboardInterrupt:
