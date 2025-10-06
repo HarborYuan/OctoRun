@@ -1,3 +1,3 @@
 """OctoRun - A command-line tool for running tasks and scripts."""
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
