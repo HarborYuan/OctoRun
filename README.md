@@ -155,6 +155,10 @@ def main():
     
     # Your custom arguments
     parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--learning_rate', type=float, default=0.001)
+    parser.add_argument('--model_type', type=str, default='default')
+    parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--output_dir', type=str, default='./output')
     
     args = parser.parse_args()
     
