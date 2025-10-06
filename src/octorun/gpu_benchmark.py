@@ -175,8 +175,9 @@ class GPUBenchmark:
         
         # Header
         header = (
-            f"{'GPU':<5} | {'Status':<12} | {'Compute (TFLOPs)':<20} | "
-            f"{'Memory (GB/s)':<18} | {'Last Test':<20}"
+            f"{'GPU':<3} | {'Status':<10} | {'TFLOPs':<8} | {'Mat':<8} | {'c_dtype':<7} | "
+            f"{'Mem Alloc':<10} | {'Mem Rsvd':<10} | {'Mem Copy':<15} | {'Mem Size':<8} | "
+            f"{'m_dtype':<7} | {'Last Test':<10}"
         )
         print(header)
         print("-" * len(header))
@@ -190,17 +191,43 @@ class GPUBenchmark:
             last_compute = result['compute_history'][-1]['result'] if result['compute_history'] else {}
             if 'tflops' in last_compute:
                 compute_str = f"{last_compute['tflops']:.2f}"
-            elif 'estimated_utilization_percent' in last_compute:
-                compute_str = f"{last_compute['estimated_utilization_percent']:.1f}% util"
             else:
                 compute_str = "N/A"
+            
+            mat_size = last_compute.get('matrix_size', 'N/A')
+            compute_dtype = last_compute.get('dtype', 'N/A')
+            if compute_dtype == 'float16':
+                compute_dtype = 'f16'
+            elif compute_dtype == 'float32':
+                compute_dtype = 'f32'
+            elif compute_dtype == 'bfloat16':
+                compute_dtype = 'bf16'
+
+            mem_alloc = last_compute.get('memory_allocated_gb', 'N/A')
+            mem_rsvd = last_compute.get('memory_reserved_gb', 'N/A')
+            if isinstance(mem_alloc, float):
+                mem_alloc = f"{mem_alloc:.2f}G"
+            if isinstance(mem_rsvd, float):
+                mem_rsvd = f"{mem_rsvd:.2f}G"
 
             # Memory
             last_memory = result['memory_history'][-1]['result'] if result['memory_history'] else {}
             if 'bandwidth_gbps' in last_memory:
-                memory_str = f"{last_memory['bandwidth_gbps']:.2f}"
+                memory_str = f"{last_memory['bandwidth_gbps']:.2f} GB/s"
             else:
                 memory_str = "N/A"
+
+            mem_size = last_memory.get('size', 'N/A')
+            if isinstance(mem_size, int):
+                mem_size = f"{mem_size / 1024**2:.0f}M"
+            memory_dtype = last_memory.get('dtype', 'N/A')
+            if memory_dtype == 'float16':
+                memory_dtype = 'f16'
+            elif memory_dtype == 'float32':
+                memory_dtype = 'f32'
+            elif memory_dtype == 'bfloat16':
+                memory_dtype = 'bf16'
+
 
             # Last test time
             last_test_time = result.get('last_test_time')
@@ -211,8 +238,9 @@ class GPUBenchmark:
                 last_test_str = "Never"
             
             row = (
-                f"{gpu_id:<5} | {status:<12} | {compute_str:<20} | "
-                f"{memory_str:<18} | {last_test_str:<20}"
+                f"{gpu_id:<3} | {status:<10} | {compute_str:<8} | {mat_size:<8} | {compute_dtype:<7} | "
+                f"{mem_alloc:<10} | {mem_rsvd:<10} | {memory_str:<15} | {mem_size:<8} | "
+                f"{memory_dtype:<7} | {last_test_str:<10}"
             )
             print(row)
         

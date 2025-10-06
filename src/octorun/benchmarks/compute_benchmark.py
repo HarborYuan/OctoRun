@@ -32,10 +32,11 @@ def test_compute_performance_torch(gpu_id, duration=10.0):
     torch.cuda.synchronize()
     
     # Actual test
-    matrix_size = 4096  # Larger matrix for more intensive computation
-    a = torch.randn(matrix_size, matrix_size, device=device, dtype=torch.float16)
-    b = torch.randn(matrix_size, matrix_size, device=device, dtype=torch.float16)
-    
+    matrix_size = 16_384  # Larger matrix for more intensive computation
+    dtype = torch.bfloat16
+    a = torch.randn(matrix_size, matrix_size, device=device, dtype=dtype)
+    b = torch.randn(matrix_size, matrix_size, device=device, dtype=dtype)
+
     operations = 0
     start_time = time.time()
     
@@ -68,6 +69,7 @@ def test_compute_performance_torch(gpu_id, duration=10.0):
         "memory_allocated_gb": memory_allocated,
         "memory_reserved_gb": memory_reserved,
         "matrix_size": matrix_size,
+        "dtype": dtype.__str__().split('.')[-1],
         "framework": "pytorch"
     }
 
