@@ -49,6 +49,9 @@ uv tool install octorun
 uv add octorun
 ```
 
+### Optional extras
+- Benchmark tooling: `pip install "octorun[benchmark]"` (installs PyTorch with CUDA support)
+
 ## ⚡ Quick Start
 
 1.  **Create Configuration**:
@@ -103,6 +106,7 @@ octorun benchmark
 ```
 
 This command runs a series of tests to help you configure the `gpus` parameter in your `config.json` for the best performance.
+Requires the optional benchmark extra (`pip install "octorun[benchmark]"`) so PyTorch is available.
 
 ## ⚙️ Configuration
 

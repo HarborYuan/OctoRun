@@ -1,12 +1,13 @@
 """Command-line interface for octorun."""
 
 import argparse
+import importlib.util
 import json
 import os
 import sys
 import subprocess
 import pwd
-from typing import Dict, List, Optional, Dict
+from typing import Dict, List, Optional
 
 from . import __version__ as version
 
@@ -300,6 +301,10 @@ def cmd_save_config(args: argparse.Namespace) -> int:
 
 def cmd_benchmark(args: argparse.Namespace) -> int:
     """Handle the benchmark command."""
+    if importlib.util.find_spec("torch") is None:
+        print("❌ PyTorch is not installed. Install the benchmark extra with `uv add octorun[benchmark]` or `pip install \"octorun[benchmark]\"`.")
+        return 1
+
     from .gpu_benchmark import run_gpu_benchmark
     
     # Parse GPU IDs
