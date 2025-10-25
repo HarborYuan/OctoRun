@@ -31,7 +31,7 @@ def test_memory_bandwidth_torch(gpu_id, duration=5.0):
     dtype = torch.float32 # cpu does not support bf16
     
     # Memory copy test
-    data = torch.randn(size, device='cpu', dtype=dtype)
+    data = torch.randn(size, device='cpu', dtype=dtype, pin_memory=True)
     bytes_per_element = data.element_size()
     
     operations = 0
