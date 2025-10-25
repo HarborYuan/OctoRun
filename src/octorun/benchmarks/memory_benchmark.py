@@ -40,7 +40,7 @@ def test_memory_bandwidth_torch(gpu_id, duration=5.0):
     while (time.time() - start_time) < duration:
         torch.cuda.synchronize()
         # Copy operation
-        data_copy = data.to(device=device)
+        data_copy = data.to(device=device, non_blocking=True)
         torch.cuda.synchronize()
         operations += 1
     
