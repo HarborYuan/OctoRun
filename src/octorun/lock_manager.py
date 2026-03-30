@@ -1,6 +1,5 @@
 import datetime
 import os
-import random
 from typing import Optional, Set
 
 
@@ -94,11 +93,10 @@ class ChunkLockManager:
         # Get completed chunks from persistent storage
         completed_chunks = self.get_completed_chunks()
 
-        # Create a list of available chunks and shuffle for randomness
-        available_chunks = [i for i in range(total_chunks) 
+        # Iterate chunks sequentially from 0, pick first available
+        available_chunks = [i for i in range(total_chunks)
                           if i not in exclude_chunks and i not in completed_chunks]
-        random.shuffle(available_chunks)
-        
+
         for chunk_id in available_chunks:
             if self.acquire_lock(chunk_id):
                 return chunk_id
