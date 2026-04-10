@@ -4,185 +4,248 @@
 
 **Distributed Parallel Execution Made Simple**
 
-*A powerful command-line tool for running Python scripts across multiple GPUs with intelligent task management and monitoring*
+*Run Python scripts across multiple GPUs with intelligent chunk management, failure recovery, and live job monitoring*
 
 [![PyPI version](https://img.shields.io/pypi/v/octorun.svg)](https://pypi.org/project/octorun/)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![CUDA](https://img.shields.io/badge/CUDA-supported-green.svg)](https://developer.nvidia.com/cuda-downloads)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/HarborYuan/OctoRun/actions)
 
 ---
 
 </div>
 
-## 📋 Overview
+## Overview
 
-**OctoRun** is designed to help you run computationally intensive Python scripts across multiple GPUs efficiently. It automatically manages GPU allocation, chunks your workload, handles failures with retry mechanisms, and provides comprehensive monitoring and logging.
+OctoRun dispatches one Python worker process per GPU, divides your dataset into chunks, and coordinates work across multiple machines through shared lock files. Each worker independently claims a chunk, processes it, and writes its output atomically — making it safe to run OctoRun on many nodes simultaneously without any central coordinator.
 
-## ✨ Key Features
+## Key Features
 
-- 🔍 **Automatic GPU Detection**: Automatically detects and utilizes available GPUs
-- 🧩 **Intelligent Chunk Management**: Divides work into chunks and distributes across GPUs
-- 🔄 **Failure Recovery**: Automatic retry mechanism for failed chunks
-- 📊 **Comprehensive Logging**: Detailed logging for monitoring and debugging
-- ⚙️ **Flexible Configuration**: JSON-based configuration with CLI overrides
-- 🎯 **Kwargs Support**: Pass custom arguments to your scripts via config or CLI
-- 💾 **Memory Monitoring**: Monitor GPU memory usage and thresholds
-- 🔒 **Lock Management**: Prevent duplicate processing of chunks
+- **Automatic GPU Detection** — detects and allocates all available GPUs
+- **Chunk-Based Work Distribution** — divides keys by stride, not by file, so any `total_chunks` value works regardless of input sharding
+- **Failure Recovery** — stale locks (heartbeat timeout 5 min) are automatically reclaimed; configurable retries
+- **Multi-Machine Safe** — multiple OctoRun instances on different nodes share the same lock directory on a shared filesystem
+- **Live Job Monitoring** — `octorun status` shows active sessions, completed chunks, and stale locks at a glance
 
-## 🚀 Installation
+## Installation
 
-You can install OctoRun using `pip` or `uv`.
-
-### Via pip
 ```bash
+# Via uv (recommended)
+uv tool install octorun
+
+# In a project venv
+uv add octorun
+
+# Via pip
 pip install octorun
 ```
 
-### Via uv
-```bash
-# Install globally
-uv tool install octorun
-
-# Install in your project
-uv add octorun
-```
-
-### Optional extras
-- Benchmark tooling: `pip install "octorun[benchmark]"` (installs PyTorch with CUDA support)
-
-## ⚡ Quick Start
-
-1.  **Create Configuration**:
-    ```bash
-    octorun save_config --script ./your_script.py
-    ```
-
-2.  **Run Your Script**:
-    ```bash
-    octorun run
-    ```
-
-3.  **Monitor GPUs**:
-    ```bash
-    octorun list_gpus -d
-    ```
-
-## 🎮 Commands
-
-### `run` (r)
-
-Run your script with the specified configuration.
+Optional extras:
 
 ```bash
-octorun run --config config.json [--kwargs '{"key": "value"}']
+# GPU benchmark tooling (requires PyTorch)
+pip install "octorun[benchmark]"
 ```
 
-### `save_config` (s)
+## Quick Start
 
-Generate a default configuration file.
+```bash
+# 1. Generate a default config
+octorun save_config --script ./your_script.py
+
+# 2. Run across all available GPUs
+octorun run --config config.json
+
+# 3. Monitor progress from any machine
+octorun status ./logs
+```
+
+## Commands
+
+### `run` (`r`)
+
+Launch workers across all available GPUs.
+
+```bash
+octorun run --config config.json
+octorun run --config config.json --kwargs '{"batch_size": 64}'
+```
+
+CLI `--kwargs` override any `kwargs` values from the config file.
+
+---
+
+### `status` (`st`)
+
+Show a live summary of a running or completed job.
+
+```bash
+octorun status <log_dir>
+octorun status <log_dir> --alive-threshold 120
+```
+
+`log_dir` is the same directory you set as `log_dir` in your config. It contains the `*_session_*.log` files and the `locks/` subdirectory.
+
+Example output:
+
+```
+OctoRun Job Status — ./logs/stage3
+──────────────────────────────────────────────────────────────
+  Locks total  : 164
+  Completed    : 29
+  Active       : 48  (6 sessions)
+  Stale locks  : 87  (dead workers, will be auto-reclaimed)
+──────────────────────────────────────────────────────────────
+
+Active sessions (6):
+  node1               8 chunks  [25, 26, 28, 32, ...]  (heartbeat 43s ago)
+  node2               8 chunks  [16, 18, 20, 21, ...]  (heartbeat 47s ago)
+  ...
+
+Dead sessions — stale locks (4 node(s)):
+  node3               8 chunks  [161, 162, ...]  (last seen 1h31m ago)
+  ...
+```
+
+| Field | Meaning |
+|-------|---------|
+| **Locks total** | Lock files currently on disk (active + stale) |
+| **Completed** | Chunks that finished successfully (persistent `.completed` markers) |
+| **Active** | Chunks held by workers with a live heartbeat |
+| **Stale locks** | Locks from crashed/killed workers — reclaimed automatically when the next chunk finishes on any active node |
+
+`--alive-threshold` (default 300 s) sets how long a session can be silent before it is considered dead.
+
+---
+
+### `save_config` (`s`)
+
+Write a default `config.json` to the current directory.
 
 ```bash
 octorun save_config --script ./your_script.py
 ```
 
-### `list_gpus` (l)
+---
 
-List available GPUs and their current usage.
+### `list_gpus` (`l`)
+
+List available GPUs.
 
 ```bash
-octorun list_gpus [--detailed]
+octorun list_gpus
+octorun list_gpus --detailed
 ```
 
-The `detailed` flag provides a more comprehensive view of GPU stats, including memory usage, temperature, and running processes.
+---
 
-### `benchmark` (b)
+### `benchmark` (`b`)
 
-Run a benchmark to determine the optimal number of parallel processes for your GPUs.
+Continuously measure GPU TFLOPs and communication bandwidth.
 
 ```bash
 octorun benchmark
+octorun benchmark --gpus 0,1,2 --test-duration 10 --interval 30
 ```
 
-This command runs a series of tests to help you configure the `gpus` parameter in your `config.json` for the best performance.
-Requires the optional benchmark extra (`pip install "octorun[benchmark]"`) so PyTorch is available.
+Requires `octorun[benchmark]`.
 
-## ⚙️ Configuration
+## Configuration
 
-OctoRun uses a `config.json` file for configuration. You can generate a default one with `octorun save_config`.
+Generate a starter config with `octorun save_config`, then edit as needed:
 
-| Option             | Description                                  | Default        |
-| ------------------ | -------------------------------------------- | -------------- |
-| `script_path`      | Path to your Python script                   | -              |
-| `gpus`             | "auto" or list of GPU IDs                    | "auto"         |
-| `total_chunks`     | Number of chunks to divide work into         | 128            |
-| `log_dir`          | Directory for log files                      | "./logs"       |
-| `chunk_lock_dir`   | Directory for chunk lock files               | "./logs/locks" |
-| `monitor_interval` | Monitoring interval in seconds               | 60             |
-| `restart_failed`   | Whether to restart failed processes          | false          |
-| `max_retries`      | Maximum retries for failed chunks            | 3              |
-| `memory_threshold` | Memory threshold percentage                  | 90             |
-| `kwargs`           | Custom arguments to pass to your script      | {}             |
-
-## 🎯 Using Kwargs
-
-You can pass custom arguments to your script via the `kwargs` object in your `config.json` or directly through the CLI.
-
-**CLI kwargs will override config file kwargs.**
-
-```bash
-octorun run --kwargs '{"batch_size": 128, "learning_rate": 0.005}'
+```json
+{
+    "script_path": "your_script.py",
+    "gpus": "auto",
+    "total_chunks": 1000,
+    "log_dir": "./logs",
+    "chunk_lock_dir": "./logs/locks",
+    "monitor_interval": 60,
+    "restart_failed": true,
+    "max_retries": 2,
+    "kwargs": {
+        "input_dir": "/data/input",
+        "output_dir": "/data/output",
+        "batch_size": 32
+    }
+}
 ```
 
-## 🔧 Script Implementation
+| Option | Description | Default |
+|--------|-------------|---------|
+| `script_path` | Path to your Python worker script | — |
+| `gpus` | `"auto"` or a list of GPU IDs | `"auto"` |
+| `total_chunks` | Total number of chunks to divide work into | `128` |
+| `log_dir` | Directory for session and chunk logs | `"./logs"` |
+| `chunk_lock_dir` | Directory for lock files | `"./logs/locks"` |
+| `monitor_interval` | Seconds between process-status checks | `60` |
+| `restart_failed` | Retry failed chunks | `false` |
+| `max_retries` | Maximum retries per chunk | `3` |
+| `kwargs` | Extra arguments forwarded to your script | `{}` |
 
-Your script must accept the following arguments:
+## Writing a Worker Script
 
--   `--gpu_id`: GPU device ID (int)
--   `--chunk_id`: Current chunk number (int)
--   `--total_chunks`: Total number of chunks (int)
-
-Here is an example of how to structure your script:
+Your script must accept three OctoRun arguments plus any custom ones:
 
 ```python
 import argparse
-import torch
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    # Required by OctoRun
+    p.add_argument("--gpu_id",       type=int, required=True)
+    p.add_argument("--chunk_id",     type=int, required=True)
+    p.add_argument("--total_chunks", type=int, required=True)
+    # Your own arguments (forwarded via kwargs)
+    p.add_argument("--input_dir",    type=str, required=True)
+    p.add_argument("--output_dir",   type=str, required=True)
+    p.add_argument("--batch_size",   type=int, default=32)
+    return p.parse_args()
 
 def main():
-    parser = argparse.ArgumentParser()
-    
-    # Required OctoRun arguments
-    parser.add_argument('--gpu_id', type=int, required=True)
-    parser.add_argument('--chunk_id', type=int, required=True)
-    parser.add_argument('--total_chunks', type=int, required=True)
-    
-    # Your custom arguments
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--learning_rate', type=float, default=0.001)
-    parser.add_argument('--model_type', type=str, default='default')
-    parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--output_dir', type=str, default='./output')
-    
-    args = parser.parse_args()
-    
-    # Set the GPU device
-    if torch.cuda.is_available():
-        torch.cuda.set_device(args.gpu_id)
-        print(f"Using GPU {args.gpu_id}")
-    
-    print(f"Processing chunk {args.chunk_id}/{args.total_chunks}")
-    
-    # Your logic here
+    args = parse_args()
+
+    # Shard your dataset by stride
+    all_keys = sorted(load_all_keys(args.input_dir))
+    my_keys  = all_keys[args.chunk_id::args.total_chunks]
+
+    # Skip if already done (idempotent)
+    output_path = get_output_path(args.output_dir, args.chunk_id, args.total_chunks)
+    if output_path.exists():
+        return
+
+    # Process and write atomically
+    results = process(my_keys, gpu=args.gpu_id, batch_size=args.batch_size)
+    write_atomic(results, output_path)
 
 if __name__ == "__main__":
     main()
 ```
 
-## 🤝 Contributing
+## Multi-Machine Usage
 
-Contributions are welcome! Please fork the repository, create a feature branch, and submit a pull request.
+Run OctoRun on each machine, pointing at the **same shared `log_dir` and `chunk_lock_dir`**:
 
-## 📄 License
+```bash
+# machine A
+octorun run --config config.json   # claims chunks 0, 1, 2, ...
 
-This project is licensed under the **MIT License**.
+# machine B (simultaneously)
+octorun run --config config.json   # claims the next available chunks
+```
+
+Lock files on the shared filesystem prevent any chunk from being processed twice.
+Monitor all machines from anywhere:
+
+```bash
+octorun status ./logs
+```
+
+## Contributing
+
+Fork the repository, create a feature branch, and open a pull request.
+
+## License
+
+MIT License.

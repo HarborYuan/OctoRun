@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 from . import __version__ as version
 
 from .runner import ProcessManager
+from .status import print_status
 
 
 def get_available_gpus() -> List[int]:
@@ -196,6 +197,27 @@ def create_parser() -> argparse.ArgumentParser:
         help="Show detailed GPU information",
     )
     
+    # Status command
+    status_parser = subparsers.add_parser(
+        "status",
+        aliases=["st"],
+        description="Show live status of a running or completed OctoRun job",
+        help="Show job status: active sessions, completed chunks, stale locks",
+    )
+    status_parser.set_defaults(command="status")
+    status_parser.add_argument(
+        "log_dir",
+        type=str,
+        help="Log directory passed as log_dir in the OctoRun config (contains session logs and locks/)",
+    )
+    status_parser.add_argument(
+        "--alive-threshold",
+        type=int,
+        default=300,
+        metavar="SECONDS",
+        help="Seconds without a heartbeat before a session is considered dead (default: 300)",
+    )
+
     # GPU Benchmark command
     benchmark_parser = subparsers.add_parser(
         "benchmark",
@@ -378,6 +400,12 @@ def cmd_list_gpus(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_status(args: argparse.Namespace) -> int:
+    """Handle the status command."""
+    print_status(args.log_dir, alive_threshold=args.alive_threshold)
+    return 0
+
+
 def get_process_username(pid: int) -> Optional[str]:
     """
     Get the username of a process given its PID.
@@ -418,6 +446,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_list_gpus(args)
     elif args.command == "benchmark":
         return cmd_benchmark(args)
+    elif args.command == "status":
+        return cmd_status(args)
     else:
         parser.print_help()
         return 1
