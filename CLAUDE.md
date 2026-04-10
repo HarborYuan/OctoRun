@@ -21,7 +21,8 @@ uv run pytest tests/test_runner.py::TestProcessManager::test_init
 # CLI usage
 uv run octorun save_config --script your_script.py  # generate config.json
 uv run octorun run --config config.json             # run workload
-uv run octorun list_gpus --detail                   # list GPUs with metrics
+uv run octorun run --config config.json --kwargs '{"batch_size": 64}'  # override kwargs
+uv run octorun list_gpus --detailed                  # list GPUs with metrics
 uv run octorun benchmark                            # GPU benchmark
 
 # Build and publish (CI handles this on release)
@@ -54,3 +55,16 @@ User scripts must implement these three arguments:
 - `--total_chunks`: total number of chunks (for computing data slices)
 
 Chunks must be independent and deterministic — the same `chunk_id` always processes the same data slice.
+
+### Config schema
+
+`config.json` fields (see `default_config.json`):
+- `script_path`: path to user script
+- `gpus`: list of GPU IDs or `"auto"` (filters GPUs with >100MB free memory)
+- `total_chunks`: number of work chunks to divide the job into
+- `kwargs`: dict of extra `--key value` args passed to each subprocess; CLI `--kwargs` JSON overrides these
+- `log_dir`: directory for session log and per-chunk `chunk_N.log` files
+- `chunk_lock_dir`: directory for `.lock` and `completed/chunk_N.completed` files (shared across machines for distributed runs)
+- `monitor_interval`: seconds between polling subprocess status
+- `restart_failed` + `max_retries`: retry policy for non-zero exit codes
+- `memory_threshold`: unused in current code (reserved)

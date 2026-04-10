@@ -2,6 +2,9 @@ import datetime
 import os
 from typing import Optional, Set
 
+_HEARTBEAT_MARKER = "HEARTBEAT"
+_STALE_TIMEOUT_SECONDS = 300  # 5 minutes
+
 
 class ChunkLockManager:
     """Manages chunk locks to prevent concurrent execution of the same chunk.
@@ -58,10 +61,27 @@ class ChunkLockManager:
             print(f"Error reading completed chunks: {e}")
         return completed
 
+    def _is_lock_stale(self, lock_file: str) -> bool:
+        """Return True if the lock file has a HEARTBEAT marker and its timestamp is older than _STALE_TIMEOUT_SECONDS.
+
+        Old-format lock files (no HEARTBEAT marker) are never considered stale for
+        backward compatibility with octorun < 1.0.0.
+        """
+        try:
+            with open(lock_file, 'r') as f:
+                lines = f.read().strip().split('\n')
+            if len(lines) < 3 or lines[2] != _HEARTBEAT_MARKER:
+                return False  # Old format — don't touch it
+            timestamp = datetime.datetime.fromisoformat(lines[1])
+            age = (datetime.datetime.now() - timestamp).total_seconds()
+            return age > _STALE_TIMEOUT_SECONDS
+        except Exception:
+            return False  # Be conservative if we can't read the file
+
     def acquire_lock(self, chunk_id: int) -> bool:
         """Acquire a lock for the given chunk ID.
            If completed, return False.
-           If already locked, return False.
+           If already locked (and not stale), return False.
            If successfully locked, return True.
         """
 
@@ -69,13 +89,21 @@ class ChunkLockManager:
             return False
 
         lock_file = os.path.join(self.lock_dir, f"chunk_{chunk_id}.lock")
+
+        # Remove stale lock left by a crashed process (new-format only)
+        if os.path.exists(lock_file) and self._is_lock_stale(lock_file):
+            try:
+                os.remove(lock_file)
+            except OSError:
+                pass  # Another process may have claimed or removed it first
+
         try:
             # Try to create lock file with exclusive access
             fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
-            # Write process info to lock file
+            # Write process info with HEARTBEAT marker so this lock supports refresh
             with os.fdopen(fd, 'w') as f:
-                f.write(f"{os.getpid()}\n{datetime.datetime.now().isoformat()}\n")
+                f.write(f"{os.getpid()}\n{datetime.datetime.now().isoformat()}\n{_HEARTBEAT_MARKER}\n")
 
             self.acquired_locks.add(chunk_id)
             return True
@@ -83,6 +111,23 @@ class ChunkLockManager:
         except OSError:
             # Lock file already exists (chunk is taken)
             return False
+
+    def refresh_lock(self, chunk_id: int) -> bool:
+        """Update the timestamp in a lock file to prevent it from appearing stale."""
+        if chunk_id not in self.acquired_locks:
+            return False
+        lock_file = os.path.join(self.lock_dir, f"chunk_{chunk_id}.lock")
+        try:
+            with open(lock_file, 'w') as f:
+                f.write(f"{os.getpid()}\n{datetime.datetime.now().isoformat()}\n{_HEARTBEAT_MARKER}\n")
+            return True
+        except OSError:
+            return False
+
+    def refresh_all_locks(self) -> None:
+        """Refresh timestamps for all locks acquired by this manager."""
+        for chunk_id in list(self.acquired_locks):
+            self.refresh_lock(chunk_id)
         
 
     def get_next_available_chunk(self, total_chunks: int, exclude_chunks: Optional[Set[int]] = None) -> Optional[int]:

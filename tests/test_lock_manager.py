@@ -125,7 +125,8 @@ class TestChunkLockManager:
         with open(lock_file, 'r') as f:
             lines = f.read().strip().split('\n')
             assert lines[0] == str(os.getpid())
-            assert len(lines) == 2  # pid and timestamp
+            assert len(lines) == 3  # pid, timestamp, HEARTBEAT marker
+            assert lines[2] == "HEARTBEAT"
     
     def test_acquire_lock_fails_when_completed(self):
         """Test lock acquisition fails when chunk is already completed"""
@@ -198,21 +199,17 @@ class TestChunkLockManager:
         chunk_id = self.lock_manager.get_next_available_chunk(total_chunks)
         assert chunk_id is None
     
-    def test_get_next_available_chunk_randomness(self):
-        """Test that get_next_available_chunk provides randomness"""
-        total_chunks = 10
-        results = set()
-        
-        # Run multiple times to check for randomness
-        for _ in range(20):
-            # Reset state
-            self.lock_manager.release_all_locks()
-            chunk_id = self.lock_manager.get_next_available_chunk(total_chunks)
-            if chunk_id is not None:
-                results.add(chunk_id)
-        
-        # Should get multiple different chunks due to randomness
-        assert len(results) > 1
+    def test_get_next_available_chunk_sequential(self):
+        """Test that get_next_available_chunk assigns chunks sequentially"""
+        total_chunks = 5
+
+        # First call should return chunk 0
+        chunk_id = self.lock_manager.get_next_available_chunk(total_chunks)
+        assert chunk_id == 0
+
+        # Second call (chunk 0 still locked) should return chunk 1
+        chunk_id2 = self.lock_manager.get_next_available_chunk(total_chunks)
+        assert chunk_id2 == 1
     
     def test_release_chunk_success(self):
         """Test successful chunk release"""

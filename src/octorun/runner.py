@@ -1,10 +1,13 @@
 import datetime
+import threading
 import time
 from .lock_manager import ChunkLockManager
 import json
 import os
 import subprocess
 from typing import Dict, List, Optional
+
+_HEARTBEAT_INTERVAL = 30  # seconds
 
 
 class ProcessManager:
@@ -213,6 +216,7 @@ class ProcessManager:
         self.log_message(f"GPU IDs: {gpu_ids}")
         self.log_message(f"Using lock-based chunk assignment from: {self.config['chunk_lock_dir']}")
 
+        self._start_heartbeat()
         try:
             # Initial process assignment - try to get available chunks for each GPU
             for gpu_id in gpu_ids:
@@ -277,24 +281,46 @@ class ProcessManager:
         except KeyboardInterrupt:
             self.log_message("Interrupted by user. Terminating processes...")
             self.cleanup()
-        
+            self.print_summary()
+            return
+
+        self._stop_heartbeat()
+
         # Final summary
         self.print_summary()
     
+    def _start_heartbeat(self):
+        """Start a background thread that refreshes lock timestamps every 30 seconds."""
+        self._heartbeat_stop = threading.Event()
+
+        def _loop():
+            while not self._heartbeat_stop.wait(_HEARTBEAT_INTERVAL):
+                self.chunk_lock_manager.refresh_all_locks()
+
+        self._heartbeat_thread = threading.Thread(target=_loop, daemon=True, name="octorun-heartbeat")
+        self._heartbeat_thread.start()
+
+    def _stop_heartbeat(self):
+        if hasattr(self, '_heartbeat_stop'):
+            self._heartbeat_stop.set()
+            self._heartbeat_thread.join(timeout=5)
+
     def cleanup(self):
         """Cleanup all running processes and release chunk locks"""
+        self._stop_heartbeat()
+
         for chunk_id, proc_info in self.processes.items():
             process = proc_info['process']
             if process.poll() is None:
                 self.log_message(f"Terminating process for chunk {chunk_id} (PID: {process.pid})")
                 process.terminate()
-                
+
                 # Wait a bit, then kill if necessary
                 try:
                     process.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     process.kill()
-        
+
         # Release all acquired chunk locks
         self.chunk_lock_manager.release_all_locks()
         self.log_message("All chunk locks released")

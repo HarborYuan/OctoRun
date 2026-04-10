@@ -1,6 +1,6 @@
 [project]
 name = "octorun"
-version = "0.3.0"
+version = "1.0.0"
 description = "A command-line tool for distributed parallel execution across multiple GPUs"
 readme = "README.md"
 authors = [
