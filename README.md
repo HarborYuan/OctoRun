@@ -186,6 +186,39 @@ Generate a starter config with `octorun save_config`, then edit as needed:
 
 ## Writing a Worker Script
 
+### `--gpu_id` is a local rank, not a device index
+
+**OctoRun does not set `CUDA_VISIBLE_DEVICES` or any other GPU environment variable.**
+`--gpu_id` is simply the index of this worker among the workers launched on the current
+machine — i.e. a `local_rank`. If you launch with `gpus: [0, 1, 2, 3]`, four workers
+start with `--gpu_id 0`, `1`, `2`, `3` respectively, but OctoRun leaves device selection
+entirely to your script.
+
+Common patterns:
+
+```python
+# Pattern A — direct device index (works when no other processes use the GPUs)
+torch.cuda.set_device(args.gpu_id)
+
+# Pattern B — set CUDA_VISIBLE_DEVICES before any CUDA init so the process
+# only sees one device and always addresses it as cuda:0.
+# Do this at the very top of the script, before importing torch/transformers.
+import os, argparse
+_p = argparse.ArgumentParser(add_help=False)
+_p.add_argument("--gpu_id", type=int, default=0)
+_early, _ = _p.parse_known_args()
+os.environ["CUDA_VISIBLE_DEVICES"] = str(_early.gpu_id)
+# Now import torch — it will only see one GPU
+import torch
+model = model.to("cuda:0")
+```
+
+Pattern B is strongly recommended when loading large models (transformers, etc.) because
+many libraries initialize CUDA at import time and will claim the wrong device if
+`CUDA_VISIBLE_DEVICES` is not set beforehand.
+
+### Minimal script template
+
 Your script must accept three OctoRun arguments plus any custom ones:
 
 ```python
@@ -193,7 +226,7 @@ import argparse
 
 def parse_args():
     p = argparse.ArgumentParser()
-    # Required by OctoRun
+    # Required by OctoRun — gpu_id is a local_rank, not a device index
     p.add_argument("--gpu_id",       type=int, required=True)
     p.add_argument("--chunk_id",     type=int, required=True)
     p.add_argument("--total_chunks", type=int, required=True)
