@@ -114,11 +114,15 @@ class ProcessManager:
             # Setup environment
             env = os.environ.copy()
 
-            # Setup logging
+            # Setup logging — append, not truncate. Preserves prior attempts'
+            # output across retries, and avoids a 30s lease-conflict stall on
+            # networked filesystems (HDFS-fuse) where O_TRUNC blocks while
+            # another writer holds the file.
             log_file = os.path.join(self.config['log_dir'], f"chunk_{chunk_id}.log")
 
-            with open(log_file, 'w') as f:
-                f.write(f"Starting process on GPU {gpu_id}, chunk {chunk_id}\n")
+            with open(log_file, 'a') as f:
+                f.write(f"=== Starting process on GPU {gpu_id}, chunk {chunk_id} "
+                        f"({datetime.datetime.now().isoformat()}) ===\n")
                 f.write(f"Command: {' '.join(cmd)}\n")
                 f.write("-" * 50 + "\n")
 
@@ -162,7 +166,8 @@ class ProcessManager:
             else:
                 # Process finished
                 return_code = process.returncode
-                if return_code == 0:
+                success_codes = self.config.get('success_codes', [0])
+                if return_code in success_codes:
                     status['completed'].append(chunk_id)
                     self.completed_chunks.add(chunk_id)
                     proc_info['status'] = 'completed'

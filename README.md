@@ -182,7 +182,21 @@ Generate a starter config with `octorun save_config`, then edit as needed:
 | `monitor_interval` | Seconds between process-status checks | `60` |
 | `restart_failed` | Retry failed chunks | `false` |
 | `max_retries` | Maximum retries per chunk | `3` |
+| `success_codes` | Worker exit codes treated as success | `[0]` |
 | `kwargs` | Extra arguments forwarded to your script | `{}` |
+
+### `success_codes`
+
+By default a chunk is considered complete only when the worker exits with code `0`.
+Add additional codes here when your worker has a known-benign non-zero exit. For
+example, if the worker calls `sys.exit(0)` but the CPython interpreter shutdown
+phase fails (often `120` due to atexit / stdout-flush errors on slow networked
+filesystems), the chunk's data is already written and you can safely treat `120`
+as success:
+
+```json
+"success_codes": [0, 120]
+```
 
 ## Writing a Worker Script
 
@@ -274,6 +288,19 @@ Monitor all machines from anywhere:
 ```bash
 octorun status ./logs
 ```
+
+### Shared filesystem requirements
+
+`chunk_lock_dir` relies on `O_CREAT | O_EXCL` having atomic, cross-client
+semantics. **Use a POSIX-compliant filesystem** (local disk, NFS, CephFS, etc.).
+
+**Do not place `chunk_lock_dir` on object-storage-backed filesystems** such as
+HDFS-fuse or s3fs — they typically fall back to non-atomic
+"stat-then-create" sequences and have client-side metadata caching, both of
+which let two workers acquire the same lock. Output data can still live on
+HDFS / S3, but locking requires a real filesystem. If you must run on such
+storage, ensure your worker writes outputs idempotently (`tmp + rename`) and
+treat the lock as best-effort rather than a correctness guarantee.
 
 ## Contributing
 
