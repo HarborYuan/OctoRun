@@ -5,6 +5,7 @@ from .lock_manager import ChunkLockManager
 import json
 import os
 import subprocess
+import sys
 from typing import Dict, List, Optional
 
 _HEARTBEAT_INTERVAL = 30  # seconds
@@ -36,7 +37,13 @@ class ProcessManager:
             self.log_message(f"Found {len(self.completed_chunks)} previously completed chunks: {sorted(self.completed_chunks)}")
     
     def setup_logging(self):
-        """Setup logging directory"""
+        """Setup logging directory and open the session log file once.
+
+        Holding a long-lived line-buffered fd avoids re-opening the file on
+        every log message — re-opens trigger a stat() round-trip, which on
+        networked filesystems (HDFS-fuse) can return transient EOVERFLOW under
+        load and crash the runner.
+        """
         log_dir = self.config['log_dir']
         os.makedirs(log_dir, exist_ok=True)
 
@@ -46,19 +53,29 @@ class ProcessManager:
         machine_name = os.uname().nodename
         self.session_log = os.path.join(log_dir, f"{machine_name}_session_{timestamp}.log")
 
-        with open(self.session_log, 'w') as f:
-            f.write(f"Session Started: {self.start_time}\n")
-            f.write(f"Configuration: {json.dumps(self.config, indent=2)}\n")
-            f.write("-" * 80 + "\n")
+        self._session_fp = open(self.session_log, 'w', buffering=1)
+        self._session_fp.write(f"Session Started: {self.start_time}\n")
+        self._session_fp.write(f"Configuration: {json.dumps(self.config, indent=2)}\n")
+        self._session_fp.write("-" * 80 + "\n")
+        self._session_fp.flush()
 
     def log_message(self, message: str):
-        """Log message to session log and print"""
+        """Log message to session log and print.
+
+        A failed log write must never kill the runner — the message has
+        already been emitted to stdout via print(), and abandoning every
+        in-flight chunk over a transient FS hiccup is a far worse outcome.
+        """
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_entry = f"[{timestamp}] {message}"
         print(log_entry)
-        
-        with open(self.session_log, 'a') as f:
-            f.write(log_entry + "\n")
+
+        try:
+            self._session_fp.write(log_entry + "\n")
+        except OSError as e:
+            sys.stderr.write(
+                f"[octorun] suppressed session-log write error: {e}\n"
+            )
 
     def read_and_print_process_errors(self, chunk_id: int, log_file: str, num_lines: int = 20):
         """Read and print the last few lines of a failed process log file"""
