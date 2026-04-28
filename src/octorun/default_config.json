@@ -11,5 +11,6 @@
     "monitor_interval": 60,
     "restart_failed": false,
     "max_retries": 3,
-    "memory_threshold": 90
+    "memory_threshold": 90,
+    "success_codes": [0]
 }
