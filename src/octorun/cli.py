@@ -218,6 +218,11 @@ def create_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="Seconds without a heartbeat before a session is considered dead (default: 300)",
     )
+    status_parser.add_argument(
+        "--no-clean",
+        action="store_true",
+        help="Do not reap stale locks before reporting (default: reap them)",
+    )
 
     # Install Claude Code skill command
     install_skill_parser = subparsers.add_parser(
@@ -423,7 +428,11 @@ def cmd_list_gpus(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     """Handle the status command."""
-    print_status(args.log_dir, alive_threshold=args.alive_threshold)
+    print_status(
+        args.log_dir,
+        alive_threshold=args.alive_threshold,
+        cleanup=not args.no_clean,
+    )
     return 0
 
 

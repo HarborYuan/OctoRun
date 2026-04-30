@@ -62,14 +62,17 @@ class ChunkLockManager:
         return completed
 
     def _is_lock_stale(self, lock_file: str) -> bool:
-        """Return True if the lock file has a HEARTBEAT marker and its timestamp is older than _STALE_TIMEOUT_SECONDS.
+        """Return True if the lock file is stale.
 
-        Empty (0-byte) lock files older than the timeout are also considered stale —
-        they are left behind when a process dies between O_CREAT|O_EXCL and the
-        subsequent write(), or by an unflushed write to a network filesystem.
+        A lock is stale if any of:
+          - it is malformed (empty, missing HEARTBEAT marker, or unparseable
+            timestamp) — it cannot be refreshed, so a live worker cannot own it
+          - it has a HEARTBEAT marker with a timestamp older than
+            _STALE_TIMEOUT_SECONDS
 
-        Old-format non-empty lock files (no HEARTBEAT marker) are never considered
-        stale for backward compatibility with octorun < 1.0.0.
+        Empty files get a grace period equal to the stale timeout so a worker
+        that just created the file via O_CREAT|O_EXCL but has not yet written
+        to it isn't reaped out from under itself.
         """
         try:
             st = os.stat(lock_file)
@@ -79,12 +82,34 @@ class ChunkLockManager:
             with open(lock_file, 'r') as f:
                 lines = f.read().strip().split('\n')
             if len(lines) < 3 or lines[2] != _HEARTBEAT_MARKER:
-                return False  # Old format — don't touch it
+                return True  # Malformed / pre-1.0 format — no live owner can refresh it
             timestamp = datetime.datetime.fromisoformat(lines[1])
             age = (datetime.datetime.now() - timestamp).total_seconds()
             return age > _STALE_TIMEOUT_SECONDS
+        except FileNotFoundError:
+            return False
         except Exception:
-            return False  # Be conservative if we can't read the file
+            return True  # Unreadable / corrupt — treat as stale
+
+    def cleanup_stale_locks(self) -> int:
+        """Remove every stale lock file in lock_dir. Returns the number removed."""
+        removed = 0
+        try:
+            entries = os.listdir(self.lock_dir)
+        except OSError:
+            return 0
+        for name in entries:
+            if not name.endswith('.lock'):
+                continue
+            lock_file = os.path.join(self.lock_dir, name)
+            if not self._is_lock_stale(lock_file):
+                continue
+            try:
+                os.remove(lock_file)
+                removed += 1
+            except OSError:
+                pass
+        return removed
 
     def acquire_lock(self, chunk_id: int) -> bool:
         """Acquire a lock for the given chunk ID.

@@ -64,17 +64,30 @@ def _read_session_tail(log_path: Path) -> tuple[Optional[datetime.datetime], lis
     return last_ts, running_chunks
 
 
-def get_status(log_dir: str, alive_threshold: int = _ALIVE_THRESHOLD_SECONDS) -> dict:
+def get_status(
+    log_dir: str,
+    alive_threshold: int = _ALIVE_THRESHOLD_SECONDS,
+    cleanup: bool = True,
+) -> dict:
     """Collect job status from log_dir.
+
+    When ``cleanup`` is True (default), stale locks are removed from
+    ``log_dir/locks/`` before the lock count is taken so the reported numbers
+    reflect post-cleanup state.
 
     Returns a dict with keys:
       lock_count, completed_count, alive_sessions, dead_sessions,
-      active_chunk_count, stale_lock_count
+      active_chunk_count, stale_lock_count, cleaned_lock_count
     where each session is (node_name, age_seconds, chunk_ids).
     """
     log_path = Path(log_dir)
     lock_dir = log_path / 'locks'
     completed_dir = lock_dir / 'completed'
+
+    cleaned_lock_count = 0
+    if cleanup and lock_dir.exists():
+        from .lock_manager import ChunkLockManager
+        cleaned_lock_count = ChunkLockManager(str(lock_dir)).cleanup_stale_locks()
 
     lock_count = len(list(lock_dir.glob('*.lock'))) if lock_dir.exists() else 0
     completed_count = len(list(completed_dir.glob('*.completed'))) if completed_dir.exists() else 0
@@ -97,7 +110,10 @@ def get_status(log_dir: str, alive_threshold: int = _ALIVE_THRESHOLD_SECONDS) ->
         (alive_sessions if age <= alive_threshold else dead_sessions).append((node, age, chunks))
 
     active_chunk_count = sum(len(c) for _, _, c in alive_sessions)
-    stale_lock_count = max(0, lock_count - active_chunk_count - completed_count)
+    # Locks left in lock_dir are by definition not yet completed (release_chunk
+    # removes the .lock file before mark_chunk_completed writes to completed/),
+    # so the residual after subtracting active chunks is stale.
+    stale_lock_count = max(0, lock_count - active_chunk_count)
 
     return {
         'lock_count': lock_count,
@@ -106,17 +122,23 @@ def get_status(log_dir: str, alive_threshold: int = _ALIVE_THRESHOLD_SECONDS) ->
         'dead_sessions': dead_sessions,
         'active_chunk_count': active_chunk_count,
         'stale_lock_count': stale_lock_count,
+        'cleaned_lock_count': cleaned_lock_count,
     }
 
 
-def print_status(log_dir: str, alive_threshold: int = _ALIVE_THRESHOLD_SECONDS) -> None:
+def print_status(
+    log_dir: str,
+    alive_threshold: int = _ALIVE_THRESHOLD_SECONDS,
+    cleanup: bool = True,
+) -> None:
     """Print a status summary for an OctoRun job to stdout.
 
     Args:
         log_dir: Directory containing session logs and a locks/ subdirectory.
         alive_threshold: Seconds since last heartbeat before a session is dead.
+        cleanup: If True (default), reap stale locks before reporting.
     """
-    s = get_status(log_dir, alive_threshold)
+    s = get_status(log_dir, alive_threshold, cleanup=cleanup)
     width = 62
 
     print(f"\nOctoRun Job Status — {log_dir}")
@@ -125,7 +147,10 @@ def print_status(log_dir: str, alive_threshold: int = _ALIVE_THRESHOLD_SECONDS) 
     print(f"  Completed    : {s['completed_count']}")
     n_alive = len(s['alive_sessions'])
     print(f"  Active       : {s['active_chunk_count']}  ({n_alive} session{'s' if n_alive != 1 else ''})")
-    print(f"  Stale locks  : {s['stale_lock_count']}  (dead workers, will be auto-reclaimed)")
+    if cleanup:
+        print(f"  Stale locks  : {s['stale_lock_count']}  (cleaned {s['cleaned_lock_count']} this run)")
+    else:
+        print(f"  Stale locks  : {s['stale_lock_count']}  (dead workers, will be auto-reclaimed)")
     print('─' * width)
 
     if s['alive_sessions']:

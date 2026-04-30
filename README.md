@@ -27,6 +27,12 @@ OctoRun launches one Python worker per GPU, splits the work into `total_chunks` 
 - **Multi-node by default** — point N machines at the same shared `log_dir` and they cooperate without coordination.
 - **Live status** — `octorun status <log_dir>` prints active sessions, completed chunks, and stale locks.
 
+## What's new in 1.2.0
+
+- **`octorun status` now reaps stale locks.** Each invocation sweeps the lock dir and removes anything that no live worker can refresh, then reports the post-cleanup state. Pass `--no-clean` for read-only behavior.
+- **Aggressive stale detection.** Malformed locks and pre-1.0.0 format locks (no `HEARTBEAT` marker) are now treated as stale unconditionally — they cannot be refreshed, so a live owner is impossible. Empty-file and timestamp-based rules from 1.1.0 are unchanged.
+- **Stale-count bug fix.** The reported `Stale locks` figure used to subtract `Completed` from the total lock count, which underflowed (clamped to 0) once a job had more completions than residual locks — masking real dead-worker locks. Now computed correctly as `lock_count - active_chunk_count`.
+
 ## Install
 
 ```bash
@@ -49,7 +55,7 @@ octorun status ./logs                       # check progress (any machine)
 | Command | Purpose |
 |---------|---------|
 | `octorun run --config <cfg> [--kwargs '<json>']` | Launch workers; CLI `--kwargs` overrides config kwargs. |
-| `octorun status <log_dir> [--alive-threshold N]` | Live job summary across all machines sharing this log dir. |
+| `octorun status <log_dir> [--alive-threshold N] [--no-clean]` | Live job summary; reaps stale locks before reporting unless `--no-clean`. |
 | `octorun save_config [--script <path>]` | Write a default `config.json` here. |
 | `octorun list_gpus [--detailed]` | Show detected GPUs (with usage and processes when `-d`). |
 | `octorun benchmark [--gpus auto] [--test-duration s] [--interval s]` | Continuous TFLOPS / bandwidth probe. Requires `[benchmark]` extra. |
@@ -63,7 +69,7 @@ OctoRun Job Status — ./logs/stage3
   Locks total  : 164
   Completed    : 29
   Active       : 48  (6 sessions)
-  Stale locks  : 87  (dead workers, will be auto-reclaimed)
+  Stale locks  : 87  (cleaned 87 this run)
 ──────────────────────────────────────────────────────────────
 
 Active sessions (6):
@@ -197,12 +203,13 @@ Each in-progress chunk owns a 3-line lock file under `chunk_lock_dir`:
 HEARTBEAT
 ```
 
-A lock is considered **stale** (and reclaimable by the next `acquire_lock` call) when:
+A lock is considered **stale** (and reclaimable) when any of:
 
-- its timestamp is older than `_STALE_TIMEOUT_SECONDS` (5 min), **or**
-- it is 0 bytes and its mtime is older than the same threshold (added in 1.1.0 — these form when a process dies between `O_CREAT|O_EXCL` and the subsequent write, or when a network FS swallows the write).
+- its `HEARTBEAT` timestamp is older than `_STALE_TIMEOUT_SECONDS` (5 min);
+- it is 0 bytes and its mtime is older than the same threshold (these form when a process dies between `O_CREAT|O_EXCL` and the subsequent write, or when a network FS swallows the write);
+- it is malformed or pre-1.0.0 format (no `HEARTBEAT` marker) — since 1.2.0 these are reaped on sight (no live worker can refresh them).
 
-Pre-1.0.0 lock files (no `HEARTBEAT` marker) are never auto-cleaned, for backward compatibility.
+Stale locks are reclaimed lazily on the next `acquire_lock`, and eagerly by `octorun status` (which sweeps the lock dir before reporting; pass `--no-clean` to disable).
 
 ### Filesystem requirements
 
