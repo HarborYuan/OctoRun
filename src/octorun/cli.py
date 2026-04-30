@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shutil
 import sys
 import subprocess
 import pwd
@@ -218,6 +219,26 @@ def create_parser() -> argparse.ArgumentParser:
         help="Seconds without a heartbeat before a session is considered dead (default: 300)",
     )
 
+    # Install Claude Code skill command
+    install_skill_parser = subparsers.add_parser(
+        "install-skill",
+        description="Install the bundled Claude Code skill into ~/.claude/skills/octorun",
+        help="Install the octorun Claude Code skill",
+    )
+    install_skill_parser.set_defaults(command="install-skill")
+    install_skill_parser.add_argument(
+        "--dest",
+        type=str,
+        default=None,
+        help="Skill install root (default: ~/.claude/skills)",
+    )
+    install_skill_parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Overwrite an existing skill directory",
+    )
+
     # GPU Benchmark command
     benchmark_parser = subparsers.add_parser(
         "benchmark",
@@ -406,6 +427,46 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_install_skill(args: argparse.Namespace) -> int:
+    """Install the bundled Claude Code skill into ~/.claude/skills/octorun.
+
+    Substitutes {{OCTORUN_VERSION}} placeholders so the installed skill records
+    which octorun version it ships with.
+    """
+    src_dir = os.path.join(os.path.dirname(__file__), "skill")
+    if not os.path.isdir(src_dir):
+        print(f"❌ Bundled skill not found at {src_dir}")
+        return 1
+
+    dest_root = args.dest or os.path.expanduser("~/.claude/skills")
+    dest_dir = os.path.join(dest_root, "octorun")
+
+    if os.path.exists(dest_dir):
+        if not args.force:
+            print(f"❌ {dest_dir} already exists. Pass --force to overwrite.")
+            return 1
+        shutil.rmtree(dest_dir)
+
+    os.makedirs(dest_dir, exist_ok=True)
+    for root, _, files in os.walk(src_dir):
+        rel = os.path.relpath(root, src_dir)
+        out_root = dest_dir if rel == "." else os.path.join(dest_dir, rel)
+        os.makedirs(out_root, exist_ok=True)
+        for name in files:
+            src = os.path.join(root, name)
+            dst = os.path.join(out_root, name)
+            if name.endswith((".md", ".txt")):
+                with open(src, "r", encoding="utf-8") as f:
+                    content = f.read()
+                content = content.replace("{{OCTORUN_VERSION}}", version)
+                with open(dst, "w", encoding="utf-8") as f:
+                    f.write(content)
+            else:
+                shutil.copy2(src, dst)
+    print(f"✅ Installed octorun skill (v{version}) to {dest_dir}")
+    return 0
+
+
 def get_process_username(pid: int) -> Optional[str]:
     """
     Get the username of a process given its PID.
@@ -448,6 +509,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_benchmark(args)
     elif args.command == "status":
         return cmd_status(args)
+    elif args.command == "install-skill":
+        return cmd_install_skill(args)
     else:
         parser.print_help()
         return 1

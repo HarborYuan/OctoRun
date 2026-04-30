@@ -64,10 +64,18 @@ class ChunkLockManager:
     def _is_lock_stale(self, lock_file: str) -> bool:
         """Return True if the lock file has a HEARTBEAT marker and its timestamp is older than _STALE_TIMEOUT_SECONDS.
 
-        Old-format lock files (no HEARTBEAT marker) are never considered stale for
-        backward compatibility with octorun < 1.0.0.
+        Empty (0-byte) lock files older than the timeout are also considered stale —
+        they are left behind when a process dies between O_CREAT|O_EXCL and the
+        subsequent write(), or by an unflushed write to a network filesystem.
+
+        Old-format non-empty lock files (no HEARTBEAT marker) are never considered
+        stale for backward compatibility with octorun < 1.0.0.
         """
         try:
+            st = os.stat(lock_file)
+            if st.st_size == 0:
+                age = datetime.datetime.now().timestamp() - st.st_mtime
+                return age > _STALE_TIMEOUT_SECONDS
             with open(lock_file, 'r') as f:
                 lines = f.read().strip().split('\n')
             if len(lines) < 3 or lines[2] != _HEARTBEAT_MARKER:
