@@ -63,6 +63,8 @@ Each chunk has a lock file `<lock_dir>/chunk_<id>.lock` with three lines: pid, I
 3. If running pre-1.1.0 with 0-byte stale locks, upgrade or `rm` them manually.
 4. Re-launch workers — they will reclaim stale locks on next `acquire_lock`.
 
+In 1.2.1+ `octorun status` derives alive/stale counts from lock-file heartbeat timestamps directly, so it stays accurate even when session-log mtime lags on HDFS-fuse / NFS (append-mode writes get buffered until close). Pre-1.2.1, status would report "0 active sessions" while workers were healthily heartbeating their locks.
+
 ## Common pitfalls
 
 - **`gpus: "auto"` on CPU-only nodes** raises `ValueError`. Set an explicit slot list.

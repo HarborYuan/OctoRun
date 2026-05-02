@@ -64,6 +64,34 @@ def _read_session_tail(log_path: Path) -> tuple[Optional[datetime.datetime], lis
     return last_ts, running_chunks
 
 
+def _read_lock_heartbeats(lock_dir: Path) -> dict[int, datetime.datetime]:
+    """Return {chunk_id: heartbeat_ts} parsed from each chunk_*.lock file.
+
+    The lock format (lock_manager.ChunkLockManager) is three lines: pid,
+    ISO-8601 timestamp, HEARTBEAT marker. Workers rewrite the file in place
+    every _HEARTBEAT_INTERVAL seconds, and each rewrite is a fresh small file
+    — its mtime updates immediately even on networked filesystems (HDFS-fuse,
+    NFS) that buffer append-mode writes to long-lived session logs. The
+    timestamp on line 2 is therefore the ground-truth heartbeat for whether
+    a worker is alive, regardless of session-log lag.
+    """
+    heartbeats: dict[int, datetime.datetime] = {}
+    if not lock_dir.exists():
+        return heartbeats
+    for lock_file in lock_dir.glob('chunk_*.lock'):
+        try:
+            with open(lock_file, 'r') as f:
+                lines = f.read().strip().split('\n')
+            if len(lines) < 3 or lines[2] != 'HEARTBEAT':
+                continue
+            ts = datetime.datetime.fromisoformat(lines[1])
+            chunk_id = int(lock_file.stem[len('chunk_'):])
+        except (OSError, ValueError):
+            continue
+        heartbeats[chunk_id] = ts
+    return heartbeats
+
+
 def get_status(
     log_dir: str,
     alive_threshold: int = _ALIVE_THRESHOLD_SECONDS,
@@ -92,7 +120,20 @@ def get_status(
     lock_count = len(list(lock_dir.glob('*.lock'))) if lock_dir.exists() else 0
     completed_count = len(list(completed_dir.glob('*.completed'))) if completed_dir.exists() else 0
 
-    # Keep only the most recent session log per node
+    # Lock-file heartbeats are the source of truth for alive vs stale.
+    # Session-log mtime can lag hours behind reality on HDFS-fuse / NFS
+    # because session logs are append-mode and the FS buffers writes until
+    # close or hflush; lock files are tiny rewrite-in-place and update
+    # immediately.
+    now = datetime.datetime.now()
+    lock_heartbeats = _read_lock_heartbeats(lock_dir)
+    active_lock_chunks = {
+        chunk_id for chunk_id, ts in lock_heartbeats.items()
+        if (now - ts).total_seconds() <= alive_threshold
+    }
+
+    # Keep only the most recent session log per node — used for the per-node
+    # display (hostname + last-known chunk list), not for alive/stale counts.
     latest: dict[str, tuple[datetime.datetime, list[int]]] = {}
     for session_log in sorted(log_path.glob('*_session_*.log')):
         node = session_log.name.split('_session_')[0]
@@ -102,17 +143,23 @@ def get_status(
         if node not in latest or ts > latest[node][0]:
             latest[node] = (ts, chunks)
 
-    now = datetime.datetime.now()
     alive_sessions: list[tuple[str, int, list[int]]] = []
     dead_sessions: list[tuple[str, int, list[int]]] = []
     for node, (ts, chunks) in sorted(latest.items()):
         age = int((now - ts).total_seconds())
-        (alive_sessions if age <= alive_threshold else dead_sessions).append((node, age, chunks))
+        # Promote a session to "alive" when its session log looks stale but
+        # any chunk it claimed to be running still has a fresh lock heartbeat
+        # — this rescues sessions whose log mtime is lagging on a buffered FS.
+        log_fresh = age <= alive_threshold
+        any_lock_fresh = any(c in active_lock_chunks for c in chunks)
+        if log_fresh or any_lock_fresh:
+            alive_sessions.append((node, age, chunks))
+        else:
+            dead_sessions.append((node, age, chunks))
 
-    active_chunk_count = sum(len(c) for _, _, c in alive_sessions)
-    # Locks left in lock_dir are by definition not yet completed (release_chunk
-    # removes the .lock file before mark_chunk_completed writes to completed/),
-    # so the residual after subtracting active chunks is stale.
+    active_chunk_count = len(active_lock_chunks)
+    # Residual locks (no fresh heartbeat) are stale: cleanup will reap them
+    # next cycle, or a live worker will reclaim them on next acquire_lock.
     stale_lock_count = max(0, lock_count - active_chunk_count)
 
     return {
