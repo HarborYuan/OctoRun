@@ -137,19 +137,21 @@ class ProcessManager:
             # another writer holds the file.
             log_file = os.path.join(self.config['log_dir'], f"chunk_{chunk_id}.log")
 
-            with open(log_file, 'a') as f:
-                f.write(f"=== Starting process on GPU {gpu_id}, chunk {chunk_id} "
+            log_f = open(log_file, 'a')
+            log_f.write(f"=== Starting process on GPU {gpu_id}, chunk {chunk_id} "
                         f"({datetime.datetime.now().isoformat()}) ===\n")
-                f.write(f"Command: {' '.join(cmd)}\n")
-                f.write("-" * 50 + "\n")
+            log_f.write(f"Command: {' '.join(cmd)}\n")
+            log_f.write("-" * 50 + "\n")
+            log_f.flush()
 
             # Start process
             process = subprocess.Popen(
                 cmd,
-                stdout=open(log_file, 'a'),
+                stdout=log_f,
                 stderr=subprocess.STDOUT,
                 env=env
             )
+            log_f.close()
 
             self.processes[chunk_id] = {
                 'process': process,
