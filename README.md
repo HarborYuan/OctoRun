@@ -27,11 +27,10 @@ OctoRun launches one Python worker per GPU, splits the work into `total_chunks` 
 - **Multi-node by default** — point N machines at the same shared `log_dir` and they cooperate without coordination.
 - **Live status** — `octorun status <log_dir>` prints active sessions, completed chunks, and stale locks.
 
-## What's new in 1.2.0
+## What's new in 1.3.0
 
-- **`octorun status` now reaps stale locks.** Each invocation sweeps the lock dir and removes anything that no live worker can refresh, then reports the post-cleanup state. Pass `--no-clean` for read-only behavior.
-- **Aggressive stale detection.** Malformed locks and pre-1.0.0 format locks (no `HEARTBEAT` marker) are now treated as stale unconditionally — they cannot be refreshed, so a live owner is impossible. Empty-file and timestamp-based rules from 1.1.0 are unchanged.
-- **Stale-count bug fix.** The reported `Stale locks` figure used to subtract `Completed` from the total lock count, which underflowed (clamped to 0) once a job had more completions than residual locks — masking real dead-worker locks. Now computed correctly as `lock_count - active_chunk_count`.
+- **Per-chunk log writes use a single fd.** `start_process` previously opened `chunk_<id>.log` twice — once for the header, once as the subprocess's `stdout`. On HDFS-fuse the second open could stall on a write lease held by the first writer, and the header could land *after* the child's first output. The header is now written and `flush()`ed on one fd that is then handed to `Popen`, with the parent closing its end immediately (the child keeps its inherited fd).
+- **Tidier config reads.** `cmd_run` and `cmd_save_config` now use `with open(...) as f: json.load(f)` so config-file fds release on the spot instead of waiting for GC.
 
 ## Install
 

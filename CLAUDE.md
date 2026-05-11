@@ -39,6 +39,10 @@ OctoRun distributes a Python script across multiple GPUs by dividing work into n
 
 **`runner.py`** (`ProcessManager`) — The main execution loop. Spawns one Python subprocess per GPU per chunk, polls subprocess status, handles retries on failure, and writes per-chunk log files. The `run()` method continuously assigns available chunks to idle GPUs until all chunks complete or max retries are exhausted.
 
+`start_process` invariants worth preserving (regressed before — see v1.0.2 / 1.3.0):
+- The session log fd (`self._session_fp`) is opened once with `buffering=1` and kept open for the whole run — never re-open it per message (re-opens trigger stat() round-trips that crash on HDFS-fuse under load).
+- Per-chunk `chunk_<id>.log` must be opened **once per subprocess launch** in append mode. Write/flush the header on that same fd, then hand it to `Popen(stdout=..., stderr=STDOUT)` and close the parent's end. Do not open the log twice (header in a `with` block + a second `open(...)` for the child) — concurrent appenders race on HDFS-fuse write leases and the header can land after the child's first output.
+
 **`lock_manager.py`** (`ChunkLockManager`) — File-based distributed coordination layer. Uses atomic exclusive file creation to prevent duplicate chunk processing across machines sharing a filesystem. Locks live in `chunk_lock_dir`; completed chunks are tracked in separate `.done` files containing machine ID and timestamp. `get_next_available_chunk()` randomly selects among unlocked, uncompleted chunks to reduce contention.
 
 **`gpu_benchmark.py`** + **`benchmarks/`** — Optional benchmarking (requires `benchmark` extra). Tests compute (TFLOPs via matrix multiply) and memory bandwidth via subprocess workers, displays results in a live table.

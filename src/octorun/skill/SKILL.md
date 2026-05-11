@@ -65,6 +65,8 @@ Each chunk has a lock file `<lock_dir>/chunk_<id>.lock` with three lines: pid, I
 
 In 1.2.1+ `octorun status` derives alive/stale counts from lock-file heartbeat timestamps directly, so it stays accurate even when session-log mtime lags on HDFS-fuse / NFS (append-mode writes get buffered until close). Pre-1.2.1, status would report "0 active sessions" while workers were healthily heartbeating their locks.
 
+In 1.3.0+ per-chunk log writing uses a single fd: the runner writes/flushes the header on the same fd it hands to the subprocess as `stdout`, instead of opening `chunk_<id>.log` twice. Pre-1.3.0 the two append fds could race on HDFS-fuse write leases (occasional 30s stalls) and the header sometimes landed after the child's first output. If you see truncated or out-of-order chunk logs on HDFS-fuse, upgrade.
+
 ## Common pitfalls
 
 - **`gpus: "auto"` on CPU-only nodes** raises `ValueError`. Set an explicit slot list.
