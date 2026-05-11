@@ -281,7 +281,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     """Handle the run command."""
     # Here you would implement the actual run logic
     print(f"Running {args.config}...")
-    config = json.load(open(args.config, "r"))
+    with open(args.config, "r") as f:
+        config = json.load(f)
 
     # parse configs
     gpus = config.pop("gpus", "auto")
@@ -335,7 +336,8 @@ def cmd_save_config(args: argparse.Namespace) -> int:
     
     # get default configuration from src
     default_config_path = os.path.join(os.path.dirname(__file__), "default_config.json")
-    default_config = json.load(open(default_config_path, "r"))
+    with open(default_config_path, "r") as f:
+        default_config = json.load(f)
 
     # update script path if provided
     if args.script:
