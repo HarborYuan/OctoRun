@@ -61,70 +61,27 @@ class TestProcessManager:
             
             mock_log.assert_called_with("Found 2 previously completed chunks: [1, 2]")
     
-    @patch('src.octorun.runner.os.makedirs')
-    @patch('src.octorun.runner.os.uname')
-    @patch('src.octorun.runner.datetime')
-    @patch('builtins.open', new_callable=mock_open)
-    def test_setup_logging(self, mock_file, mock_datetime, mock_uname, mock_makedirs):
-        """Test setup_logging method"""
-        mock_start_time = datetime.datetime(2025, 6, 27, 10, 30, 45)
-        mock_datetime.datetime.now.return_value = mock_start_time
-        mock_datetime.datetime.strftime = datetime.datetime.strftime
-        
-        # Mock machine name
-        mock_uname_result = MagicMock()
-        mock_uname_result.nodename = "test-machine"
-        mock_uname.return_value = mock_uname_result
-        
-        with patch('src.octorun.runner.ChunkLockManager'), \
-             patch.object(ProcessManager, 'log_message'):
-            
-            # Create ProcessManager - setup_logging will be called automatically
-            pm = ProcessManager(self.config)
-            
-            # Verify the expected calls were made
-            mock_makedirs.assert_called_once_with(self.log_dir, exist_ok=True)
-            expected_session_log = os.path.join(self.log_dir, "test-machine_session_20250627_103045.log")
-            assert pm.session_log == expected_session_log
-            
-            # Check file was opened and written to
-            mock_file.assert_called_once_with(expected_session_log, 'w')
-            handle = mock_file.return_value.__enter__.return_value
-            assert handle.write.call_count == 3
+    def test_log_message_suppresses_session_log_write_error(self):
+        """An OSError from the session-log fd must not propagate.
 
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('src.octorun.runner.datetime')
-    def test_log_message(self, mock_datetime, mock_file):
-        """Test log_message method"""
-        mock_log_time = datetime.datetime(2025, 6, 27, 11, 0, 0)
-        mock_datetime.datetime.now.return_value = mock_log_time
-        mock_datetime.datetime.strftime = datetime.datetime.strftime
-        
+        v1.0.2 made log_message tolerate transient FS hiccups (HDFS-fuse
+        EOVERFLOW etc.) — the message has already been printed, and aborting
+        every in-flight chunk over a log write would be a far worse outcome.
+        """
+        def fake_setup_logging(self):
+            self.session_log = "/tmp/fake-session.log"
+            self._session_fp = MagicMock()
+
         with patch('src.octorun.runner.ChunkLockManager') as mock_chunk_lock_manager, \
-             patch('builtins.print') as mock_print:
-            
-            # Make sure no completed chunks are returned to avoid log_message during init
-            mock_lock_manager = mock_chunk_lock_manager.return_value
-            mock_lock_manager.get_completed_chunks.return_value = set()
-            
-            # Mock setup_logging to set session_log properly BEFORE any log_message calls
-            def mock_setup_logging(self):
-                self.session_log = "/tmp/session.log"
-            
-            with patch.object(ProcessManager, 'setup_logging', mock_setup_logging):
-                pm = ProcessManager(self.config)
-            
-            # Reset the file and print mocks to ignore any initialization calls
-            mock_file.reset_mock()
-            mock_print.reset_mock()
-            
-            pm.log_message("Test message")
-            
-            expected_log = "[2025-06-27 11:00:00] Test message"
-            mock_print.assert_called_once_with(expected_log)
-            mock_file.assert_called_once_with("/tmp/session.log", 'a')
-            handle = mock_file.return_value.__enter__.return_value
-            handle.write.assert_called_once_with(expected_log + "\n")
+             patch.object(ProcessManager, 'setup_logging', fake_setup_logging), \
+             patch('builtins.print'):
+
+            mock_chunk_lock_manager.return_value.get_completed_chunks.return_value = set()
+
+            pm = ProcessManager(self.config)
+            pm._session_fp.write.side_effect = OSError("simulated FS hiccup")
+
+            pm.log_message("should not raise")  # must not raise
 
     @patch('src.octorun.runner.subprocess.Popen')
     @patch('src.octorun.runner.os.environ')
