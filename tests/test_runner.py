@@ -221,8 +221,8 @@ class TestProcessManager:
             assert status['completed'] == [1]
             assert status['failed'] == []
             assert 1 in pm.completed_chunks
-            assert pm.processes[1]['status'] == 'completed'
-            
+            assert 1 not in pm.processes  # reaped after completion (GPU slot freed)
+
             mock_lock_manager.mark_chunk_completed.assert_called_once_with(1)
             mock_lock_manager.release_chunk.assert_called_once_with(1)
             mock_log.assert_called_with("GPU 0, chunk 1 completed successfully (Duration: 1:00:00)")
@@ -259,14 +259,16 @@ class TestProcessManager:
             assert status['completed'] == []
             assert status['failed'] == [1]
             assert 1 in pm.failed_chunks
-            assert pm.processes[1]['status'] == 'failed'
+            assert 1 not in pm.processes  # reaped after failure (GPU slot freed)
+            assert 1 not in pm.permanently_failed  # still retriable
+            assert 1 in pm.retry_after  # backoff window recorded
             assert pm.retry_count[1] == 1
-            
+
             mock_lock_manager.release_chunk.assert_called_once_with(1)
             expected_calls = [
                 call("GPU 0, chunk 1 failed with return code 1"),
                 call("Log file for chunk 1 not found: /tmp/chunk_1.log"),
-                call("Scheduling retry 1/2 for chunk 1")
+                call("Scheduling retry 1/2 for chunk 1 after 5s backoff")
             ]
             mock_log.assert_has_calls(expected_calls)
     
@@ -327,13 +329,13 @@ class TestProcessManager:
             pm = ProcessManager(self.config)
             pm.run(gpu_ids=[0, 1], total_chunks=2)
             
-            # Verify initial process starts
+            # Both idle GPUs filled on the first tick
             assert mock_start_process.call_count == 2
             mock_start_process.assert_any_call(0, 0, 2, kwargs=None)
             mock_start_process.assert_any_call(1, 1, 2, kwargs=None)
-            
-            # Verify monitoring loop
-            mock_check_processes.assert_called_once()
+
+            # Loop reaps every tick: tick 1 (fill) + tick 2 (terminal) = 2 checks
+            assert mock_check_processes.call_count == 2
             mock_print_summary.assert_called_once()
     
     def test_cleanup(self):
@@ -388,10 +390,11 @@ class TestProcessManager:
             pm.start_time = mock_start_time
             pm.completed_chunks = {2, 3}
             pm.failed_chunks = {5, 6}
+            pm.permanently_failed = {5, 6}
             pm.session_log = "/tmp/session.log"
-            
+
             pm.print_summary()
-            
+
             expected_calls = [
                 call("\n" + "=" * 80),
                 call("FINAL SUMMARY"),
@@ -399,8 +402,9 @@ class TestProcessManager:
                 call("Total execution time: 2:00:00"),
                 call("Completed chunks (globally): 4"),
                 call("Completed chunks (this session): 2"),
-                call("Failed chunks (this session): 2"),
-                call("Failed chunk IDs: [5, 6]"),
+                call("Chunks that failed at least once (this session): 2"),
+                call("Permanently failed chunks (exhausted retries): 2"),
+                call("Permanently failed chunk IDs: [5, 6]"),
                 call("Session log: /tmp/session.log"),
                 call(f"Individual logs: {self.log_dir}/chunk_*.log")
             ]

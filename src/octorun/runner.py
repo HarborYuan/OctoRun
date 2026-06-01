@@ -25,8 +25,14 @@ class ProcessManager:
         self.start_time = datetime.datetime.now()
         
         self.completed_chunks = self.chunk_lock_manager.get_completed_chunks()
-        self.failed_chunks = set()
+        self.failed_chunks = set()        # ever failed at least once this session (reporting)
+        self.permanently_failed = set()   # exhausted max_retries -> terminal, excluded from assignment
         self.retry_count = {}
+        self.retry_after = {}             # chunk_id -> monotonic ts before which we won't re-pick it (backoff)
+
+        # Exponential backoff for retrying a failed chunk: base * 2**(attempt-1), capped.
+        self.retry_base_delay = self.config.get('retry_base_delay', 5)      # seconds
+        self.retry_max_delay = self.config.get('retry_max_delay', 1800)     # 30 min cap
 
         # Setup logging
         self.setup_logging()
@@ -182,41 +188,53 @@ class ProcessManager:
             if process.poll() is None:
                 # Still running
                 status['running'].append(chunk_id)
+                continue
+
+            # Process finished -> reap it and free its GPU slot for the run loop.
+            return_code = process.returncode
+            success_codes = self.config.get('success_codes', [0])
+            if return_code in success_codes:
+                status['completed'].append(chunk_id)
+                self.completed_chunks.add(chunk_id)
+                proc_info['status'] = 'completed'
+
+                # Mark chunk as completed for all machines + release lock
+                self.chunk_lock_manager.mark_chunk_completed(chunk_id)
+                self.chunk_lock_manager.release_chunk(chunk_id)
+
+                # Clear any retry/backoff bookkeeping (e.g. a retry that finally passed)
+                self.retry_count.pop(chunk_id, None)
+                self.retry_after.pop(chunk_id, None)
+                self.failed_chunks.discard(chunk_id)
+
+                duration = datetime.datetime.now() - proc_info['start_time']
+                self.log_message(f"GPU {proc_info['gpu_id']}, chunk {chunk_id} completed successfully (Duration: {duration})")
             else:
-                # Process finished
-                return_code = process.returncode
-                success_codes = self.config.get('success_codes', [0])
-                if return_code in success_codes:
-                    status['completed'].append(chunk_id)
-                    self.completed_chunks.add(chunk_id)
-                    proc_info['status'] = 'completed'
-                    
-                    # Mark chunk as completed for all machines
-                    self.chunk_lock_manager.mark_chunk_completed(chunk_id)
-                    
-                    # Release chunk lock
-                    self.chunk_lock_manager.release_chunk(chunk_id)
-                    
-                    duration = datetime.datetime.now() - proc_info['start_time']
-                    self.log_message(f"GPU {proc_info['gpu_id']}, chunk {chunk_id} completed successfully (Duration: {duration})")
+                status['failed'].append(chunk_id)
+                self.failed_chunks.add(chunk_id)  # ever-failed, for the final summary
+                proc_info['status'] = 'failed'
+
+                # Release the lock so this node (after backoff) or any other node can retry
+                self.chunk_lock_manager.release_chunk(chunk_id)
+
+                self.log_message(f"GPU {proc_info['gpu_id']}, chunk {chunk_id} failed with return code {return_code}")
+                self.read_and_print_process_errors(chunk_id, proc_info['log_file'])
+
+                # Real retry with exponential backoff (capped). Past max_retries -> terminal.
+                attempts = self.retry_count.get(chunk_id, 0)
+                if self.config.get('restart_failed', True) and attempts < self.config.get('max_retries', 0):
+                    self.retry_count[chunk_id] = attempts + 1
+                    delay = min(self.retry_base_delay * (2 ** attempts), self.retry_max_delay)
+                    self.retry_after[chunk_id] = time.monotonic() + delay
+                    self.log_message(f"Scheduling retry {attempts + 1}/{self.config.get('max_retries', 0)} "
+                                     f"for chunk {chunk_id} after {delay:.0f}s backoff")
                 else:
-                    status['failed'].append(chunk_id)
-                    self.failed_chunks.add(chunk_id)
-                    proc_info['status'] = 'failed'
-                    
-                    # Release chunk lock
-                    self.chunk_lock_manager.release_chunk(chunk_id)
-                    
-                    self.log_message(f"GPU {proc_info['gpu_id']}, chunk {chunk_id} failed with return code {return_code}")
-                    
-                    # Read and print error details from the log file
-                    self.read_and_print_process_errors(chunk_id, proc_info['log_file'])
-                    
-                    # Handle retries
-                    if self.config['restart_failed'] and self.retry_count.get(chunk_id, 0) < self.config['max_retries']:
-                        self.retry_count[chunk_id] = self.retry_count.get(chunk_id, 0) + 1
-                        self.log_message(f"Scheduling retry {self.retry_count[chunk_id]}/{self.config['max_retries']} for chunk {chunk_id}")
-        
+                    self.permanently_failed.add(chunk_id)
+                    self.retry_after.pop(chunk_id, None)
+                    self.log_message(f"Chunk {chunk_id} permanently failed after {attempts} retries")
+
+            del self.processes[chunk_id]
+
         return status
 
     def get_completion_status(self, total_chunks: int) -> Dict:
@@ -228,7 +246,7 @@ class ProcessManager:
         return {
             'completed_count': len(all_completed),
             'running_count': len(currently_running),
-            'failed_count': len(self.failed_chunks),
+            'failed_count': len(self.permanently_failed),
             'completion_percentage': (len(all_completed) / total_chunks) * 100,
             'completed_chunks': sorted(all_completed),
             'running_chunks': sorted(currently_running)
@@ -242,66 +260,50 @@ class ProcessManager:
 
         self._start_heartbeat()
         try:
-            # Initial process assignment - try to get available chunks for each GPU
-            for gpu_id in gpu_ids:
-                chunk_id = self.chunk_lock_manager.get_next_available_chunk(
-                    total_chunks, 
-                    self.completed_chunks | self.failed_chunks
-                )
-                
-                if chunk_id is not None:
-                    self.start_process(gpu_id, chunk_id, total_chunks, kwargs=kwargs)
-                else:
-                    self.log_message(f"No available chunks for GPU {gpu_id} at startup")
-            
-            # Monitor loop
+            # Persistent GPU slots. Every tick: reap finished processes, then refill
+            # EVERY idle GPU. A GPU that can't get a chunk right now is NOT retired —
+            # it's retried next tick, so stale-lock reclaim keeps working at the tail
+            # and backed-off retries become eligible again once their delay elapses.
             while True:
-                # Check global completion status
+                # 1. Reap finished processes (frees GPU slots, updates retry/backoff state)
+                self.check_processes()
+
+                # 2. Global completion check
                 completion_status = self.get_completion_status(total_chunks)
-                
-                if completion_status['completed_count'] >= total_chunks:
+                global_completed = completion_status['completed_count']
+                if global_completed >= total_chunks:
                     self.log_message("All chunks completed!")
                     break
-
-                if completion_status['failed_count'] + completion_status['completed_count'] >= total_chunks:
-                    self.log_message("All chunks either completed or failed!")
+                if global_completed + len(self.permanently_failed) >= total_chunks:
+                    self.log_message("All chunks either completed or permanently failed!")
                     break
 
-                time.sleep(self.config['monitor_interval'])
-                
-                status = self.check_processes()
-                
-                # For each GPU that finished a chunk, try to assign a new one
-                finished_chunks = status['completed'] + status['failed']
-                for chunk_id in finished_chunks:
-                    if chunk_id in self.processes:
-                        gpu_id = self.processes[chunk_id]['gpu_id']
-                        
-                        # Try to get next available chunk for this GPU
-                        next_chunk = self.chunk_lock_manager.get_next_available_chunk(
-                            total_chunks,
-                            self.completed_chunks | self.failed_chunks | 
-                            {p_id for p_id, p_info in self.processes.items() 
-                             if p_info['status'] == 'running'}
-                        )
+                # 3. Refill every idle GPU. Chunks still in backoff are skipped here so
+                #    this node doesn't re-grab a just-failed chunk before its delay (other
+                #    nodes are free to pick it up — that flexibility is intentional).
+                busy_gpus = {p['gpu_id'] for p in self.processes.values()}
+                now = time.monotonic()
+                backoff = {c for c, t in self.retry_after.items() if t > now}
+                exclude = (self.completed_chunks | self.permanently_failed
+                           | set(self.processes.keys()) | backoff)
+                for gpu_id in gpu_ids:
+                    if gpu_id in busy_gpus:
+                        continue
+                    next_chunk = self.chunk_lock_manager.get_next_available_chunk(total_chunks, exclude)
+                    if next_chunk is not None:
+                        self.start_process(gpu_id, next_chunk, total_chunks, kwargs=kwargs)
+                        exclude.add(next_chunk)
+                        busy_gpus.add(gpu_id)
+                    # else: leave this GPU idle; it is retried on the next tick
 
-                        if next_chunk is not None:
-                            self.start_process(gpu_id, next_chunk, total_chunks, kwargs=kwargs)
-                        else:
-                            self.log_message(f"No more chunks available for GPU {gpu_id}")
-
-                        del self.processes[chunk_id]  # Remove finished chunk from tracking
-                # Print status update
-                running_count = len(status['running'])
-                global_completed = completion_status['completed_count']
-                failed_count = len([c for c in self.failed_chunks 
-                                    if not self.config['restart_failed'] or
-                                    self.retry_count.get(c, 0) >= self.config['max_retries']])
-                
-                self.log_message(f"Status: {running_count} running, {global_completed} completed globally, {failed_count} permanently failed")
+                # 4. Status update
+                self.log_message(f"Status: {len(self.processes)} running, {global_completed} completed globally, "
+                                 f"{len(self.permanently_failed)} permanently failed")
                 self.log_message(f"Progress: {completion_status['completion_percentage']:.1f}% ({global_completed}/{total_chunks})")
-                self.log_message(f"Running chunks: {completion_status['running_chunks']}")
-        
+                self.log_message(f"Running chunks: {sorted(self.processes.keys())}")
+
+                time.sleep(self.config['monitor_interval'])
+
         except KeyboardInterrupt:
             self.log_message("Interrupted by user. Terminating processes...")
             self.cleanup()
@@ -360,10 +362,11 @@ class ProcessManager:
         self.log_message(f"Total execution time: {total_time}")
         self.log_message(f"Completed chunks (globally): {len(global_completed)}")
         self.log_message(f"Completed chunks (this session): {len(self.completed_chunks)}")
-        self.log_message(f"Failed chunks (this session): {len(self.failed_chunks)}")
-        
-        if self.failed_chunks:
-            self.log_message(f"Failed chunk IDs: {sorted(self.failed_chunks)}")
+        self.log_message(f"Chunks that failed at least once (this session): {len(self.failed_chunks)}")
+        self.log_message(f"Permanently failed chunks (exhausted retries): {len(self.permanently_failed)}")
+
+        if self.permanently_failed:
+            self.log_message(f"Permanently failed chunk IDs: {sorted(self.permanently_failed)}")
 
         self.log_message(f"Session log: {self.session_log}")
         self.log_message(f"Individual logs: {self.config['log_dir']}/chunk_*.log")
